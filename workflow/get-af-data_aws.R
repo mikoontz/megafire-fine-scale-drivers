@@ -177,7 +177,59 @@ prof <- profvis::profvis(expr = {
         scan_center <- this_goes$scan_center
         local_path <- glue::glue("data/data_raw/{target_goes}/{scan_center}_{filename}.nc")
         
-        get_goes_points(aws_path, filename, scan_center, local_path)
+        # Round the image datetime to the nearest hour
+        rounded_datetime <- 
+          scan_center %>% 
+          lubridate::parse_date_time2(orders = "%Y%m%d%H%M%S") %>% # lubridate::ymd_hms() is failing me here for e.g., "2020052200050.9"
+          lubridate::round_date(scan_center, unit = "hour")
+        
+        rounded_datetime_txt <- 
+          paste0(lubridate::year(rounded_datetime),
+                 stringr::str_pad(lubridate::month(rounded_datetime), width = 2, side = "left", pad = "0"),
+                 stringr::str_pad(lubridate::day(rounded_datetime), width = 2, side = "left", pad = "0"),
+                 stringr::str_pad(lubridate::hour(rounded_datetime), width = 2, side = "left", pad = "0"),
+                 "00")
+        
+        system2(command = "aws", args = glue::glue("s3 cp s3://noaa-{target_goes}/{aws_path} {local_path} --no-sign-request"), stdout = FALSE)
+        
+        # Read in the .nc file using the {terra} package in order to preserve CRS data and values properly (and its fast!)
+        goes <- terra::rast(local_path)
+        
+        # For joining to our curvilinear grid later, we also want to add a new raster layer with the cellindex values
+        cellindex <- goes["DQF"]
+        cellindex <- terra::setValues(x = cellindex, values = terra::cells(cellindex)) %>% stats::setNames("cellindex")
+        
+        # Stack the original .nc file with the `cellindex` raster layer
+        goes <- c(goes, cellindex)
+        
+        # Get the crs of the .nc file; This will be important later because the satellite moved in 2017
+        # from its initial testing position to its operational position, and so the raster cells
+        # are representing different areas on the Earth when that happened (encoded in the CRS though)
+        goes_crs <- terra::crs(goes)
+        
+        goes_modis_sinu <-
+          goes %>%
+          terra::as.data.frame(xy = TRUE) %>%
+          dplyr::filter(Mask %in% fire_flags) %>%
+          sf::st_as_sf(coords = c("x", "y"), crs = goes_crs, remove = FALSE) %>%
+          sf::st_transform("+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +a=6371007.181 +b=6371007.181 +units=m +no_defs") %>%
+          dplyr::mutate(scan_center = lubridate::parse_date_time2(x = scan_center, orders = "%Y%m%d%H%M%S")) %>%
+          dplyr::mutate(rounded_datetime = rounded_datetime) %>%
+          dplyr::select(scan_center, rounded_datetime, cellindex, x, y, dplyr::everything()) %>%
+          dplyr::mutate(sinu_x = sf::st_coordinates(.)[, 1],
+                        sinu_y = sf::st_coordinates(.)[, 2]) %>%
+          sf::st_drop_geometry()
+        
+        readr::write_csv(x = goes_modis_sinu, file = glue::glue("data/data_output/{target_goes}/{rounded_datetime_txt}_{scan_center}_{filename}.csv"))
+        
+        system2(command = "aws", args = glue::glue("s3 cp data/data_output/{target_goes}/{rounded_datetime_txt}_{scan_center}_{filename}.csv s3://earthlab-mkoontz/{target_goes}/{rounded_datetime_txt}_{scan_center}_{filename}.csv"), stdout = FALSE)
+        
+        unlink(local_path)
+        unlink(glue::glue("data/data_output/{target_goes}/{rounded_datetime_txt}_{scan_center}_{filename}.csv"))
+        
+        rm(goes)
+        rm(goes_modis_sinu)
+        rm(cellindex)
       })
   })
 })
