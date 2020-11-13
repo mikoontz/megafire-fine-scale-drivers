@@ -1,17 +1,21 @@
-library(tidyverse)
+library(dplyr)
+library(readr)
 library(glue)
 library(lubridate)
+
+dir.create("data/out/goes16_conus", recursive = TRUE, showWarnings = FALSE)
+dir.create("data/out/goes17_conus", recursive = TRUE, showWarnings = FALSE)
 
 target_goes <- "goes17"
 get_latest_goes <- TRUE
 
-if(get_latest_goes | !file.exists(glue::glue("data/data_output/{target_goes}-filenames.csv"))) {
+if(get_latest_goes | !file.exists(glue::glue("data/out/{target_goes}_conus-filenames.csv"))) {
   # GOES-16 record begins on 2017-05-24
   # List all the GOES-16 files available on AWS
   # Takes 13 seconds for the 2017 data (May to December)
   # Takes 20 seconds for the 2018 data (full year)
   goes_aws_files <- 
-    system2(command = "aws", args = glue::glue("s3 ls noaa-{target_goes}/ABI-L2-FDCF/ --recursive --no-sign-request"), stdout = TRUE)
+    system2(command = "aws", args = glue::glue("s3 ls noaa-{target_goes}/ABI-L2-FDCC/ --recursive --no-sign-request"), stdout = TRUE)
   
   # bundle the list of filenames and extract some attributes from the
   # metadata embedded in those filenames
@@ -55,6 +59,5 @@ if(get_latest_goes | !file.exists(glue::glue("data/data_output/{target_goes}-fil
                                        stringr::str_pad(string = sec, width = 2, side = 'left', pad = '0'))) %>% 
     dplyr::select(data_product, year, month, day, hour, min, sec, doy, filename, scan_start_full, scan_end_full, scan_center_full, scan_start, scan_end, scan_center, aws_path,  aws_path_raw)
   
-  dir.create("data/data_output/", showWarnings = FALSE)
-  readr::write_csv(x = goes_af, file = glue::glue("data/data_output/{target_goes}-filenames.csv"))
+  readr::write_csv(x = goes_af, file = glue::glue("data/out/{target_goes}_conus-filenames.csv"))
 }
