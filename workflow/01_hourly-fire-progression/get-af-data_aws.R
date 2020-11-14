@@ -1,4 +1,5 @@
 library(dplyr)
+library(vroom)
 library(stringr)
 library(glue)
 library(ncdf4)
@@ -9,21 +10,30 @@ library(purrr)
 library(furrr)
 library(future)
 
-target_goes <- "goes16"
-get_latest_goes <- FALSE
+# If megafires haven't been defined, then go do that!
+if(!file.exists("data/out/megafire-events.gpkg")) {
+  source("workflow/00_define-megafires/define-megafires.R")
+}
 
-# Create directory to hold the raw GOES-16 active fire data until it gets deleted
-dir.create(glue::glue("data/raw/{target_goes}_conus/"), showWarnings = FALSE, recursive = TRUE)
+megafires <- sf::st_read("data/out/megafire-events.gpkg")
 
-# Create directory to hold all the processed GOES-16 active fire data
-dir.create(glue::glue("data/out/{target_goes}_conus/"), showWarnings = FALSE, recursive = TRUE)
-
-if(get_latest_goes | !file.exists(glue::glue("data/out/{target_goes}_conus-filenames.csv"))) {
-  source("workflow/01_hourly-fire-progression/get-af-metadata.R")
+# If list of GOES filenames hasn't been generated from AWS, then go do that
+if(!file.exists(glue::glue("data/out/goes_conus-filenames.csv"))) {
+  source("workflow/01_hourly-fire-progression/ls-goes-files-from-aws.R")
 }  
 
 # Read in the GOES metadata acquired from Amazon Earth using get-af-metadata.R script
-goes_af <- readr::read_csv(file = glue::glue("data/out/{target_goes}_conus-filenames.csv"), col_types = "ciiiiinicTTTccccc")
+goes_meta <- vroom::vroom(file = glue::glue("data/out/goes_conus-filenames.csv"), col_types = "cciiiiinicTTTccccc")
+
+
+
+
+# # Create directory to hold the raw GOES-16 active fire data until it gets deleted
+# dir.create(glue::glue("data/raw/{target_goes}_conus/"), showWarnings = FALSE, recursive = TRUE)
+# 
+# # Create directory to hold all the processed GOES-16 active fire data
+# dir.create(glue::glue("data/out/{target_goes}_conus/"), showWarnings = FALSE, recursive = TRUE)
+
 
 # GOES-16 and GOES-17
 # Get the flag values that are important using an example .nc file if not done already
@@ -42,27 +52,27 @@ goes_af <- readr::read_csv(file = glue::glue("data/out/{target_goes}_conus-filen
 # 35    temporally_filtered_low_probability_fire_pixel
 ###
 
-if(!file.exists(glue::glue("data/out/{target_goes}_conus-flag-mask-meanings.csv"))) {
-  # Get example .nc file
-  ex_aws_path <- goes_af$aws_path[1]
-  ex_filename <- goes_af$filename[1]
-  ex_local_path <- glue::glue("data/raw/{target_goes}_conus-example.nc")
-  
-  system2(command = "aws", args = glue::glue("s3 cp s3://noaa-{target_goes}/{ex_aws_path} {ex_local_path} --no-sign-request"))
-  
-  nc <- ncdf4::nc_open(ex_local_path) %>% ncdf4::ncatt_get(varid = "Mask")
-  flag_vals <- nc[["flag_values"]]
-  flag_meanings <- nc[["flag_meanings"]] %>% stringr::str_split(pattern = " ", simplify = TRUE) %>% as.vector()
-  flag_df <- data.frame(flag_vals, flag_meanings)
-  
-  readr::write_csv(x = flag_df, file = glue::glue("data/out/{target_goes}_conus-flag-mask-meanings.csv"))
-}
-
-fire_flags <- 
-  readr::read_csv(file = glue::glue("data/out/{target_goes}_conus-flag-mask-meanings.csv")) %>% 
-  dplyr::filter(stringr::str_detect(flag_meanings, pattern = "_fire_pixel")) %>% 
-  dplyr::filter(stringr::str_detect(flag_meanings, pattern = "no_fire_pixel", negate = TRUE)) %>% 
-  dplyr::pull(flag_vals)
+# if(!file.exists(glue::glue("data/out/{target_goes}_conus-flag-mask-meanings.csv"))) {
+#   # Get example .nc file
+#   ex_aws_path <- goes_af$aws_path[1]
+#   ex_filename <- goes_af$filename[1]
+#   ex_local_path <- glue::glue("data/raw/{target_goes}_conus-example.nc")
+#   
+#   system2(command = "aws", args = glue::glue("s3 cp s3://noaa-{target_goes}/{ex_aws_path} {ex_local_path} --no-sign-request"))
+#   
+#   nc <- ncdf4::nc_open(ex_local_path) %>% ncdf4::ncatt_get(varid = "Mask")
+#   flag_vals <- nc[["flag_values"]]
+#   flag_meanings <- nc[["flag_meanings"]] %>% stringr::str_split(pattern = " ", simplify = TRUE) %>% as.vector()
+#   flag_df <- data.frame(flag_vals, flag_meanings)
+#   
+#   readr::write_csv(x = flag_df, file = glue::glue("data/out/{target_goes}_conus-flag-mask-meanings.csv"))
+# }
+# 
+# fire_flags <- 
+#   readr::read_csv(file = glue::glue("data/out/{target_goes}_conus-flag-mask-meanings.csv")) %>% 
+#   dplyr::filter(stringr::str_detect(flag_meanings, pattern = "_fire_pixel")) %>% 
+#   dplyr::filter(stringr::str_detect(flag_meanings, pattern = "no_fire_pixel", negate = TRUE)) %>% 
+#   dplyr::pull(flag_vals)
 
 # Function that downloads the next GOES-16 image, reads it into memory using the {terra} package
 get_goes_points <- function(aws_path, filename, scan_center, local_path) {
