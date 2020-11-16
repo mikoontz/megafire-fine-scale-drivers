@@ -41,5 +41,6 @@ vignettes/*.pdf
 # R Environment Variables
 .Renviron
 
-data/raw
-data/out
+data/*
+
+workflow/00_credentials.R

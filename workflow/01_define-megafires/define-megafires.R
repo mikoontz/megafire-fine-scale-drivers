@@ -5,16 +5,20 @@ library(dplyr)
 library(sf)
 library(readr)
 
+dir.create("data/raw", recursive = TRUE, showWarnings = FALSE)
+dir.create("data/out", recursive = TRUE, showWarnings = FALSE)
+
 if(!dir.exists("data/raw/fire19_1.gdb/")){
   # CalFire FRAP database of California Fire perimeters for fires up to 2019
   download.file(url = "https://frap.fire.ca.gov/media/10969/fire19_1.zip", 
                 destfile = "data/raw/fire19_1.zip", 
                 method = "curl")
   
-  unzip(zipfile = "data/raw/fire19_1.zip", exdir = "data/raw/")
+  unzip(zipfile = "data/raw/fire19_1.zip", exdir = "data/raw")
+  unlink("data/raw/fire19_1.zip")
 }
 
-frap_perims <- sf::st_read("data/raw/fire19_1.gdb/", layer = "firep19_1")
+frap_perims <- sf::st_read("data/raw/fire19_1.gdb", layer = "firep19_1")
 
 # Camp, Carr, Woolsey, Mendocino Complex
 megafire_inc_num <- c("00016737", "00007808", "00338981", "00008646")
