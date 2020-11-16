@@ -15,7 +15,8 @@ if(!file.exists("data/out/megafire-events.gpkg")) {
   source("workflow/00_define-megafires/define-megafires.R")
 }
 
-megafires <- sf::st_read("data/out/megafire-events.gpkg")
+megafires <- sf::st_read("data/out/megafire-events.gpkg", stringsAsFactors = FALSE)
+
 
 # If list of GOES filenames hasn't been generated from AWS, then go do that
 if(!file.exists(glue::glue("data/out/goes_conus-filenames.csv"))) {
@@ -129,13 +130,44 @@ get_goes_points <- function(aws_path, filename, scan_center, local_path) {
   return(NULL)
 }
 
+  
 
-# Get the file names of the data that have already been processed
-processed_goes <- 
-  tibble::tibble(aws_files_raw = system2(command = "aws", args = glue::glue("s3 ls s3://earthlab-mkoontz/{target_goes}_conus/{target_goes} --recursive"), stdout = TRUE)) %>% 
-  dplyr::filter(nchar(aws_files_raw) == 139) %>% 
-  dplyr::mutate(filename_full = stringr::str_sub(string = aws_files_raw, start = 39),
-                filename = stringr::str_sub(string = filename_full, start = 29, end = -5))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# # Get the file names of the data that have already been processed
+# processed_goes <-
+#   tibble::tibble(aws_files_raw = system2(command = "aws", args = glue::glue("s3 ls s3://earthlab-mkoontz/{target_goes}_conus/{target_goes} --recursive"), stdout = TRUE)) %>%
+#   dplyr::filter(nchar(aws_files_raw) == 139) %>%
+#   dplyr::mutate(filename_full = stringr::str_sub(string = aws_files_raw, start = 39),
+#                 filename = stringr::str_sub(string = filename_full, start = 29, end = -5))
 
 # going for a parallelized parallelization approach
 # Divide data into 4 separate batches, work on a different EC2 instance for each
@@ -145,7 +177,6 @@ processed_goes <-
 n_batches <- 1
 n_subbatches <- 5 # number of cores
 
-base::set.seed(1959)
 # Only need to process the GOES file if processed data don't yet exist
 batches <- 
   goes_af %>% 

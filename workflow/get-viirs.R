@@ -6,7 +6,7 @@ library(lubridate)
 source("workflow/00_credentials.R")
 
 system2(command = "wget",
-        args = glue::glue('-e robots=off -m -np -R .html,.tmp -nH --cut-dirs=4 "https://nrt4.modaps.eosdis.nasa.gov/api/v2/content/archives/FIRMS/viirs/USA_contiguous_and_Hawaii" --header "Authorization: Bearer {viirs_laads_daac_token}" -P data/data_raw'))
+        args = glue::glue('-e robots=off -m -np -R .html,.tmp -nH --cut-dirs=4 "https://nrt4.modaps.eosdis.nasa.gov/api/v2/content/archives/FIRMS/viirs/USA_contiguous_and_Hawaii" --header "Authorization: Bearer {viirs_laads_daac_token}" -P data/raw'))
 
 wpb <- sf::st_read("data/data_raw/wpb-site-bounds.kml")
 wpb_buffer <- sf::st_buffer(wpb, dist = 0.01)
