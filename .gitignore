@@ -42,3 +42,4 @@ vignettes/*.pdf
 .Renviron
 
 data/data_raw
+data/data_output
