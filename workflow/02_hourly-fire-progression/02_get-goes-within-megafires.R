@@ -67,12 +67,13 @@ goes17_ca <- goes17 %>% sf::st_crop(sf::st_transform(california_geom, crs = sf::
 goes16_this_megafire <- goes16_ca %>% stars::st_transform_proj(crs = sf::st_crs(3310)) %>% sf::st_as_sf() %>% sf::st_crop(this_megafire_geom)
 goes17_this_megafire <- goes17_ca %>% stars::st_transform_proj(crs = sf::st_crs(3310)) %>% sf::st_as_sf() %>% sf::st_crop(this_megafire_geom)
 
+new_grid <- sf::st_intersection(x = goes16_this_megafire, y = goes17_this_megafire) %>% sf::st_intersection(this_megafire_geom)
+
 dir.create("figs/", showWarnings = FALSE)
 pdf("figs/creek-goes-overlap.pdf")
-plot(geom)
-plot(goes16_this_megafire$geometry, add = TRUE)
-plot(goes17_this_megafire$geometry, add = TRUE)
+plot(new_grid$geometry)
 dev.off()
+
 # # Create directory to hold the raw GOES-16 active fire data until it gets deleted
 # dir.create(glue::glue("data/raw/{target_goes}_conus/"), showWarnings = FALSE, recursive = TRUE)
 # 
