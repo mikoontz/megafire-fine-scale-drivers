@@ -2,7 +2,7 @@ library(dplyr)
 library(vroom)
 library(stringr)
 library(glue)
-library(ncdf4)
+library(USAboundaries)
 library(terra)
 library(sf)
 library(slider)
@@ -55,16 +55,23 @@ this_megafire_goes <-
 
 megafire_crs <- sapply(this_megafire_goes, terra::crs)
 
-geom <- sf::st_geometry(this_megafire)
+california_geom <- USAboundaries::us_states(resolution = "high", states = "California")
+this_megafire_geom <- sf::st_geometry(this_megafire)
 
-goes16 <- this_megafire_goes[[1]] %>% sf::st_crop(y = sf::st_transform(geom, crs = sf::st_crs(this_megafire_goes[[1]]))) %>% stars::st_transform_proj(crs = sf::st_crs(3310)) %>% sf::st_as_sf()
-goes17 <- this_megafire_goes[[2]] %>% sf::st_crop(y = sf::st_transform(geom, crs = sf::st_crs(this_megafire_goes[[2]]))) %>% stars::st_transform_proj(crs = sf::st_crs(3310)) %>% sf::st_as_sf()
+goes16 <- this_megafire_goes[[1]] %>% dplyr::mutate(cell = 1:ncell(.))
+goes17 <- this_megafire_goes[[2]] %>% dplyr::mutate(cell = 1:ncell(.))
 
-dir.create("figs/")
+goes16_ca <- goes16 %>% sf::st_crop(sf::st_transform(california_geom, crs = sf::st_crs(goes16)))
+goes17_ca <- goes17 %>% sf::st_crop(sf::st_transform(california_geom, crs = sf::st_crs(goes17))) 
+
+goes16_this_megafire <- goes16_ca %>% stars::st_transform_proj(crs = sf::st_crs(3310)) %>% sf::st_as_sf() %>% sf::st_crop(this_megafire_geom)
+goes17_this_megafire <- goes17_ca %>% stars::st_transform_proj(crs = sf::st_crs(3310)) %>% sf::st_as_sf() %>% sf::st_crop(this_megafire_geom)
+
+dir.create("figs/", showWarnings = FALSE)
 pdf("figs/creek-goes-overlap.pdf")
 plot(geom)
-plot(goes16$geometry, add = TRUE)
-plot(goes17$geometry, add = TRUE)
+plot(goes16_this_megafire$geometry, add = TRUE)
+plot(goes17_this_megafire$geometry, add = TRUE)
 dev.off()
 # # Create directory to hold the raw GOES-16 active fire data until it gets deleted
 # dir.create(glue::glue("data/raw/{target_goes}_conus/"), showWarnings = FALSE, recursive = TRUE)
