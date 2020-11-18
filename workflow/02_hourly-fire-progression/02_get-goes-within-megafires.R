@@ -64,6 +64,8 @@ goes17 <- this_megafire_goes[[2]] %>% dplyr::mutate(cell = 1:ncell(.))
 goes16_ca <- goes16 %>% sf::st_crop(sf::st_transform(california_geom, crs = sf::st_crs(goes16)))
 goes17_ca <- goes17 %>% sf::st_crop(sf::st_transform(california_geom, crs = sf::st_crs(goes17))) 
 
+goes16_test <- goes16 %>% sf::st_crop(sf::st_transform(this_megafire_geom, crs = sf::st_crs(goes16))) %>% as.data.frame()
+
 goes16_this_megafire <- goes16_ca %>% stars::st_transform_proj(crs = sf::st_crs(3310)) %>% sf::st_as_sf() %>% sf::st_crop(this_megafire_geom)
 goes17_this_megafire <- goes17_ca %>% stars::st_transform_proj(crs = sf::st_crs(3310)) %>% sf::st_as_sf() %>% sf::st_crop(this_megafire_geom)
 
