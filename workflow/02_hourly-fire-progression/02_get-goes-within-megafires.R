@@ -10,23 +10,57 @@ library(purrr)
 library(furrr)
 library(future)
 
-# If megafires haven't been defined, then go do that!
-if(!file.exists("data/out/megafire-events.gpkg")) {
-  source("workflow/00_define-megafires/define-megafires.R")
-}
-
+# If megafires haven't been defined, then go do that using 
+# 00_define-megafires.R script!
 megafires <- sf::st_read("data/out/megafire-events.gpkg", stringsAsFactors = FALSE)
 
+# Read in the GOES metadata acquired from Amazon Earth using 01_ls-goes-files-from-aws.R script
+goes_meta_orig <- readr::read_csv(file = glue::glue("data/out/goes_conus-filenames.csv"), col_types = "cciiiiinicTTTccccc")
 
-# If list of GOES filenames hasn't been generated from AWS, then go do that
-if(!file.exists(glue::glue("data/out/goes_conus-filenames.csv"))) {
-  source("workflow/01_hourly-fire-progression/ls-goes-files-from-aws.R")
-}  
+goes16_bad_date <- lubridate::ymd_hms("2000-01-02 12:00:00 UTC")
+goes17_min_date <- min(goes_meta_orig$scan_center_full[goes_meta_orig$target_goes == "goes17"])
 
-# Read in the GOES metadata acquired from Amazon Earth using get-af-metadata.R script
-goes_meta <- vroom::vroom(file = glue::glue("data/out/goes_conus-filenames.csv"), col_types = "cciiiiinicTTTccccc")
+goes_meta <-
+  goes_meta_orig %>% 
+  dplyr::filter(scan_center_full != goes16_bad_date,
+                scan_center_full >= goes17_min_date) %>% 
+  dplyr::mutate(filebasename = stringr::str_sub(filename, start = 1, end = -4)) %>% 
+  dplyr::arrange(scan_center_full)
+
+this_megafire <- megafires[1, ] %>% sf::st_transform(3310)
+this_megafire_name <- this_megafire$IncidentName
+
+dir.create(glue::glue("data/raw/goes/{this_megafire_name}"), 
+           showWarnings = FALSE, recursive = TRUE)
+
+goes_meta_this_megafire <-
+  goes_meta %>% 
+  dplyr::filter(scan_center_full >= this_megafire$alarm_date & scan_center_full <= this_megafire$cont_date) %>% 
+  dplyr::mutate(aws_url = glue::glue("s3://noaa-{target_goes}/{aws_path}"),
+                local_path = glue::glue("data/raw/goes/{this_megafire_name}/{scan_center}_{filename}")) %>% 
+  dplyr::mutate(command = "aws",
+                args = glue::glue("s3 cp {aws_url} {local_path} --no-sign-request")) %>% 
+  dplyr::slice(1:6)
 
 
+# download all the raw .nc files for the goes detections that are within the 
+# time frame of the megafire
+goes_meta_this_megafire %>% 
+  dplyr::select(command, args) %>% 
+  purrr::pwalk(.f = system2)
+
+this_megafire_goes <-
+  list.files(glue::glue("data/raw/goes/{this_megafire_name}"), full.names = TRUE) %>% 
+  lapply(stars::read_stars)
+
+megafire_crs <- sapply(this_megafire_goes, terra::crs)
+
+goes16 <- this_megafire_goes[[1]] %>% stars::st_transform_proj(crs = "+init=epsg:3310")
+goes17 <- this_megafire_goes[[2]]
+
+geom <- sf::st_geometry(this_megafire)
+
+?
 
 
 # # Create directory to hold the raw GOES-16 active fire data until it gets deleted
@@ -98,7 +132,7 @@ get_goes_points <- function(aws_path, filename, scan_center, local_path) {
   
   # For joining to our curvilinear grid later, we also want to include an attribute
   # representing the cell index values
-    
+  
   # Get the crs of the .nc file in order to make the centroids themselves a spatial
   # object
   goes_crs <- terra::crs(goes)
@@ -130,7 +164,7 @@ get_goes_points <- function(aws_path, filename, scan_center, local_path) {
   return(NULL)
 }
 
-  
+
 
 
 
@@ -227,10 +261,10 @@ furrr::future_map(.x = subbatches, .f = function(this_batch) {
       # Read in the .nc file using the {terra} package in order to preserve CRS data and values properly (and its fast!)
       prof <- profvis::profvis(expr = {
         goes <- terra::rast(local_path)
-      
-      # For joining to our curvilinear grid later, we also want to add a new raster layer with the cellindex values
-      cellindex <- goes["DQF"]
-      cellindex <- terra::setValues(x = cellindex, values = terra::cells(cellindex)) %>% stats::setNames("cellindex")
+        
+        # For joining to our curvilinear grid later, we also want to add a new raster layer with the cellindex values
+        cellindex <- goes["DQF"]
+        cellindex <- terra::setValues(x = cellindex, values = terra::cells(cellindex)) %>% stats::setNames("cellindex")
       })
       # Stack the original .nc file with the `cellindex` raster layer
       goes <- c(goes, cellindex)
