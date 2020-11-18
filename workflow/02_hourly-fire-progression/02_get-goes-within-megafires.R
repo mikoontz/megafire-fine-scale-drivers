@@ -55,14 +55,17 @@ this_megafire_goes <-
 
 megafire_crs <- sapply(this_megafire_goes, terra::crs)
 
-goes16 <- this_megafire_goes[[1]] %>% stars::st_transform_proj(crs = "+init=epsg:3310")
-goes17 <- this_megafire_goes[[2]]
-
 geom <- sf::st_geometry(this_megafire)
 
-?
+goes16 <- this_megafire_goes[[1]] %>% sf::st_crop(y = sf::st_transform(geom, crs = sf::st_crs(this_megafire_goes[[1]]))) %>% stars::st_transform_proj(crs = sf::st_crs(3310)) %>% sf::st_as_sf()
+goes17 <- this_megafire_goes[[2]] %>% sf::st_crop(y = sf::st_transform(geom, crs = sf::st_crs(this_megafire_goes[[2]]))) %>% stars::st_transform_proj(crs = sf::st_crs(3310)) %>% sf::st_as_sf()
 
-
+dir.create("figs/")
+pdf("figs/creek-goes-overlap.pdf")
+plot(geom)
+plot(goes16$geometry, add = TRUE)
+plot(goes17$geometry, add = TRUE)
+dev.off()
 # # Create directory to hold the raw GOES-16 active fire data until it gets deleted
 # dir.create(glue::glue("data/raw/{target_goes}_conus/"), showWarnings = FALSE, recursive = TRUE)
 # 
