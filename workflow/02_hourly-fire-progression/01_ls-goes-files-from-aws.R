@@ -4,6 +4,10 @@ library(glue)
 library(lubridate)
 library(purrr)
 library(ncdf4)
+library(stringr)
+
+dir.create("data/out/", recursive = TRUE, showWarnings = FALSE)
+dir.create("data/raw/", recursive = TRUE, showWarnings = FALSE)
 
 aws_ls_goes <- function(target_goes, get_latest_goes = FALSE) {
   if(get_latest_goes | !file.exists(glue::glue("data/out/goes_conus-filenames.csv"))) {
@@ -101,14 +105,14 @@ if(!file.exists("data/out/goes-mask-meanings.csv") | !file.exists("data/out/goes
   
   this_nc <- ncdf4::nc_open(ex_local_path) %>% ncdf4::ncatt_get(varid = "Mask")
   flag_vals <- this_nc[["flag_values"]]
-  flag_meanings <- this_nc[["flag_meanings"]] %>% str_split(pattern = " ", simplify = TRUE) %>% as.vector()
+  flag_meanings <- this_nc[["flag_meanings"]] %>% stringr::str_split(pattern = " ", simplify = TRUE) %>% as.vector()
   flag_df <- data.frame(flag_vals, flag_meanings)
   
   readr::write_csv(x = flag_df, file = "data/out/goes-mask-meanings.csv")
   
   this_nc <- ncdf4::nc_open(ex_local_path) %>% ncdf4::ncatt_get(varid = "DQF")
   flag_vals <- this_nc[["flag_values"]]
-  flag_meanings <- this_nc[["flag_meanings"]] %>% str_split(pattern = " ", simplify = TRUE) %>% as.vector()
+  flag_meanings <- this_nc[["flag_meanings"]] %>% stringr::str_split(pattern = " ", simplify = TRUE) %>% as.vector()
   flag_df <- data.frame(flag_vals, flag_meanings)
   
   readr::write_csv(x = flag_df, file = "data/out/goes-dqf-meanings.csv")
