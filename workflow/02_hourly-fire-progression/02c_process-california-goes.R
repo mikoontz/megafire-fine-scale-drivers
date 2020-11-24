@@ -58,7 +58,7 @@ subset_goes_to_california <- function(aws_url, local_path, scan_center, filebase
   
   readr::write_csv(x = this_ca, file = glue::glue("data/out/goes/california/{scan_center}_{filebasename}.csv"))
   
-  system2(command = "aws", args = glue::glue("s3 cp data/out/goes/california/{scan_center}_{filebasename}.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_california/{scan_center}_{filebasename}.csv"), stdout = FALSE)
+  system2(command = "aws", args = glue::glue("s3 cp data/out/goes/california/{scan_center}_{filebasename}.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_california/{scan_center}_{filebasename}.csv --acl public-read"), stdout = FALSE)
   
   unlink(local_path)
   unlink(glue::glue("data/out/goes/california/{scan_center}_{filebasename}.csv"))
@@ -89,5 +89,7 @@ goes_meta_with_crs <-
   })
 
 readr::write_csv(x = goes_meta_with_crs, file = "data/out/goes_conus-filenames-with-crs.csv")
+
+system2(command = "aws", args = glue::glue("s3 cp data/out/goes_conus-filenames-with-crs.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_conus-filenames-with-crs.csv --acl public-read"))
 
 (difftime(Sys.time(), start))
