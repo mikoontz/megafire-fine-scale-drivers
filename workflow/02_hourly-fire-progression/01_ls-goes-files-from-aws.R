@@ -3,9 +3,10 @@ library(readr)
 library(glue)
 library(lubridate)
 library(purrr)
+library(ncdf4)
 
 aws_ls_goes <- function(target_goes, get_latest_goes = FALSE) {
-  if(get_latest_goes | !file.exists(glue::glue("data/out/{target_goes}_conus-filenames.csv"))) {
+  if(get_latest_goes | !file.exists(glue::glue("data/out/goes_conus-filenames.csv"))) {
     # GOES-16 record begins on 2017-05-24
     # List all the GOES-16 files available on AWS
     # Takes 13 seconds for the 2017 data (May to December)
@@ -62,9 +63,54 @@ aws_ls_goes <- function(target_goes, get_latest_goes = FALSE) {
 
 
 target_goes <- c("goes16", "goes17")
-get_latest_goes <- TRUE
 
-sapply(glue::glue("data/out/{target_goes}_conus"), FUN = dir.create, recursive = TRUE, showWarnings = FALSE)
-goes <- purrr::map_dfr(target_goes, .f = aws_ls_goes, get_latest_goes = TRUE)
+goes_meta <- 
+  purrr::map_dfr(target_goes, .f = aws_ls_goes, get_latest_goes = TRUE) %>% 
+  dplyr::mutate(filebasename = stringr::str_sub(filename, start = 1, end = -4)) %>% 
+  dplyr::mutate(aws_url = glue::glue("s3://noaa-{target_goes}/{aws_path}"),
+                local_path = glue::glue("data/raw/goes/california/{scan_center}_{filename}"))
 
-readr::write_csv(x = goes, file = glue::glue("data/out/goes_conus-filenames.csv"))
+readr::write_csv(x = goes_meta, file = glue::glue("data/out/goes_conus-filenames.csv"))
+
+### write the Mask and DQF meanings to disk
+
+# GOES-16 and GOES-17
+# Get the flag values that are important using an example .nc file if not done already
+# flag_vals                            flag_meanings
+# 10                                   good_fire_pixel
+# 11                              saturated_fire_pixel
+# 12                     cloud_contaminated_fire_pixel
+# 13                       high_probability_fire_pixel
+# 14                     medium_probability_fire_pixel
+# 15                        low_probability_fire_pixel
+# 30               temporally_filtered_good_fire_pixel
+# 31          temporally_filtered_saturated_fire_pixel
+# 32 temporally_filtered_cloud_contaminated_fire_pixel
+# 33   temporally_filtered_high_probability_fire_pixel
+# 34 temporally_filtered_medium_probability_fire_pixel
+# 35    temporally_filtered_low_probability_fire_pixel
+###
+
+if(!file.exists("data/out/goes-mask-meanings.csv") | !file.exists("data/out/goes-dqf-meanings.csv")) {
+  # Get example .nc file
+  ex_aws_path <- goes_meta$aws_url[1]
+  ex_filename <- goes_meta$filename[1]
+  ex_local_path <- "data/raw/goes-example.nc"
+  
+  system2(command = "aws", args = glue::glue("s3 cp {ex_aws_path} {ex_local_path} --no-sign-request"))
+  
+  this_nc <- ncdf4::nc_open(ex_local_path) %>% ncdf4::ncatt_get(varid = "Mask")
+  flag_vals <- this_nc[["flag_values"]]
+  flag_meanings <- this_nc[["flag_meanings"]] %>% str_split(pattern = " ", simplify = TRUE) %>% as.vector()
+  flag_df <- data.frame(flag_vals, flag_meanings)
+  
+  readr::write_csv(x = flag_df, file = "data/out/goes-mask-meanings.csv")
+  
+  this_nc <- ncdf4::nc_open(ex_local_path) %>% ncdf4::ncatt_get(varid = "DQF")
+  flag_vals <- this_nc[["flag_values"]]
+  flag_meanings <- this_nc[["flag_meanings"]] %>% str_split(pattern = " ", simplify = TRUE) %>% as.vector()
+  flag_df <- data.frame(flag_vals, flag_meanings)
+  
+  readr::write_csv(x = flag_df, file = "data/out/goes-dqf-meanings.csv")
+  
+}
