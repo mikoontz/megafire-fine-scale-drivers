@@ -1,3 +1,5 @@
+install.packages("USAboundariesData", repos = "http://packages.ropensci.org", type = "source")
+
 library(dplyr)
 library(vroom)
 library(stringr)
@@ -8,8 +10,6 @@ library(sf)
 library(purrr)
 library(furrr)
 library(future)
-
-install.packages("USAboundariesData", repos = "http://packages.ropensci.org", type = "source")
 
 dir.create("data/out/goes/california", recursive = TRUE, showWarnings = FALSE)
 
@@ -70,22 +70,24 @@ processed_goes <-
   tibble::tibble(aws_files_raw = system2(command = "aws", args = glue::glue("s3 ls s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_california --recursive"), stdout = TRUE)) %>%
   dplyr::filter(nchar(aws_files_raw) == 163) %>%
   dplyr::mutate(filename_full = stringr::str_sub(string = aws_files_raw, start = 32),
-                filename = stringr::str_sub(string = filename_full, start = 45, end = -5))
+                filename = stringr::str_sub(string = filename_full, start = 45, end = -1))
 
 goes_meta_with_crs_batches <-
   goes_meta %>% 
-  dplyr::mutate(processed_name = glue::glue("{scan_center}_{filebasename}")) %>% 
+  dplyr::mutate(processed_name = glue::glue("{scan_center}_{filebasename}.csv")) %>% 
   dplyr::filter(!(processed_name %in% processed_goes$filename)) %>% 
   dplyr::group_by(group = sample(x = 1:96, size = nrow(.), replace = TRUE)) %>% 
   dplyr::group_split()
 
 
 (start <- Sys.time())
-future::plan(strategy = "sequential")
+future::plan(strategy = "multiprocess", workers = 96)
 
 goes_meta_with_crs <-
-  furrr::future_map_dfr(goes_meta_with_crs, .f = function(x) {
+  furrr::future_map_dfr(goes_meta_with_crs_batches, .f = function(x) {
     x %>% dplyr::mutate(crs = purrr::pmap(., .f = subset_goes_to_california))
   })
+
+readr::write_csv(x = goes_meta_with_crs, file = "data/out/goes_conus-filenames-with-crs.csv")
 
 (difftime(Sys.time(), start))
