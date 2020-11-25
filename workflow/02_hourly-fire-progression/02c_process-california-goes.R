@@ -1,30 +1,31 @@
-install.packages("USAboundariesData", repos = "http://packages.ropensci.org", type = "source")
+dependencies <- c("dplyr", "stringr", "readr", "glue", "USAboundaries", "terra", "sf", "purrr", "furrr", "future", "here")
 
-library(dplyr)
-library(vroom)
-library(stringr)
-library(glue)
-library(USAboundaries)
-library(terra)
-library(sf)
-library(purrr)
-library(furrr)
-library(future)
+needs_install <- !sapply(dependencies, FUN = require, character.only = TRUE)
 
-dir.create("data/out/goes/california", recursive = TRUE, showWarnings = FALSE)
+install.packages(dependencies[needs_install])
 
-source("workflow/00_credentials.R")
+sapply(dependencies[needs_install], FUN = require, character.only = TRUE)
+
+if(!require(USAboundariesData)) {
+  install.packages("USAboundariesData", repos = "http://packages.ropensci.org", type = "source")
+}
+
+require(USAboundariesData)
+
+dir.create(here::here("data/out/goes/california"), recursive = TRUE, showWarnings = FALSE)
+
+# source("workflow/00_credentials.R")
 
 # Read in the GOES metadata acquired from Amazon Earth using 01_ls-goes-files-from-aws.R script
-goes_meta <- readr::read_csv(file = glue::glue("data/out/goes_conus-filenames.csv"), col_types = "cciiiiinicTTTcccccccc")
+goes_meta <- readr::read_csv(file = here::here("data/out/goes_conus-filenames.csv"), col_types = "cciiiiinicTTTcccccccc")
 
-dir.create(glue::glue("data/raw/goes/california"), 
+dir.create(here::here("data/raw/goes/california"), 
            showWarnings = FALSE, recursive = TRUE)
 
 california_geom <- USAboundaries::us_states(resolution = "high", states = "California")
 
 fire_flags <- 
-  readr::read_csv(file = "data/out/goes-mask-meanings.csv") %>% 
+  readr::read_csv(file = here::here("data/out/goes-mask-meanings.csv")) %>% 
   dplyr::filter(stringr::str_detect(flag_meanings, pattern = "_fire_pixel")) %>% 
   dplyr::filter(stringr::str_detect(flag_meanings, pattern = "no_fire_pixel", negate = TRUE)) %>% 
   dplyr::pull(flag_vals)
@@ -32,9 +33,9 @@ fire_flags <-
 subset_goes_to_california <- function(aws_url, local_path, scan_center, filebasename, ...) {
   
   # download all the raw .nc files for the goes detections
-  system2(command = "aws", args = glue::glue("s3 cp {aws_url} {local_path} --no-sign-request"))
+  system2(command = "aws", args = glue::glue("s3 cp {aws_url} {here::here(local_path)} --no-sign-request"))
   
-  this <- terra::rast(local_path)
+  this <- terra::rast(here::here(local_path))
   
   ca_goes_geom <- 
     sf::st_transform(california_geom, crs = terra::crs(this)) %>% 
@@ -56,14 +57,15 @@ subset_goes_to_california <- function(aws_url, local_path, scan_center, filebase
                   y_3310 = sf::st_coordinates(.)[, 2]) %>%
     sf::st_drop_geometry()
   
-  readr::write_csv(x = this_ca, file = glue::glue("data/out/goes/california/{scan_center}_{filebasename}.csv"))
+  readr::write_csv(x = this_ca, file = glue::glue("{here::here()}/data/out/goes/california/{scan_center}_{filebasename}.csv"))
   
-  system2(command = "aws", args = glue::glue("s3 cp data/out/goes/california/{scan_center}_{filebasename}.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_california/{scan_center}_{filebasename}.csv --acl public-read"), stdout = FALSE)
+  system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/goes/california/{scan_center}_{filebasename}.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_california/{scan_center}_{filebasename}.csv --acl public-read"), stdout = FALSE)
   
   unlink(local_path)
-  unlink(glue::glue("data/out/goes/california/{scan_center}_{filebasename}.csv"))
+  unlink(glue::glue("{here::here()}/data/out/goes/california/{scan_center}_{filebasename}.csv"))
   
-  return(terra::crs(this)[[1]])
+  # return(terra::crs(this)[[1]])
+  return(NULL)
 }
 
 processed_goes <-
@@ -81,15 +83,15 @@ goes_meta_with_crs_batches <-
 
 
 (start <- Sys.time())
-future::plan(strategy = "multiprocess", workers = 96)
+future::plan(strategy = "multicore", workers = 96)
 
 goes_meta_with_crs <-
   furrr::future_map_dfr(goes_meta_with_crs_batches, .f = function(x) {
-    x %>% dplyr::mutate(crs = purrr::pmap(., .f = subset_goes_to_california))
+    purrr::pmap(x, .f = subset_goes_to_california)
   })
 
-readr::write_csv(x = goes_meta_with_crs, file = "data/out/goes_conus-filenames-with-crs.csv")
+readr::write_csv(x = goes_meta_with_crs, file = here::here("data/out/goes_conus-filenames-with-crs.csv"))
 
-system2(command = "aws", args = glue::glue("s3 cp data/out/goes_conus-filenames-with-crs.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_conus-filenames-with-crs.csv --acl public-read"))
+system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/goes_conus-filenames-with-crs.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_conus-filenames-with-crs.csv --acl public-read"))
 
 (difftime(Sys.time(), start))
