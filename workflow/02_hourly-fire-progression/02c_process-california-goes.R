@@ -61,10 +61,6 @@ subset_goes_to_california <- function(aws_url, local_path, scan_center, filebase
   system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/goes/california/{scan_center}_{filebasename}.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_california/{scan_center}_{filebasename}.csv --acl public-read"), stdout = FALSE)
   
   unlink(here::here(local_path), force = TRUE)
-  path <- list.files("data/raw/goes/california/", full.names = TRUE)
-  
-  this
-  
   unlink(glue::glue("{here::here()}/data/out/goes/california/{scan_center}_{filebasename}.csv"))
   
   # return(terra::crs(this)[[1]])
@@ -84,23 +80,15 @@ goes_meta_with_crs_batches <-
   dplyr::group_by(group = sample(x = 1:96, size = nrow(.), replace = TRUE)) %>% 
   dplyr::group_split()
 
-m <- pryr::mem_change(subset_goes_to_california(aws_url, local_path, scan_center, filebasename))
-
-goes_meta_with_crs <-
-  purrr::map_dfr(goes_meta_with_crs_batches, .f = function(x) {
-    purrr::pmap(x, .f = subset_goes_to_california)
-  })
-
 (start <- Sys.time())
-future::plan(strategy = "multicore", workers = 96)
+future::plan(strategy = "multiprocess", workers = 96)
 
-goes_meta_with_crs <-
-  furrr::future_map_dfr(goes_meta_with_crs_batches, .f = function(x) {
-    purrr::pmap(x, .f = subset_goes_to_california)
-  })
+furrr::future_map(goes_meta_with_crs_batches, .f = function(x) {
+  purrr::pmap(x, .f = subset_goes_to_california)
+})
 
-readr::write_csv(x = goes_meta_with_crs, file = here::here("data/out/goes_conus-filenames-with-crs.csv"))
-
-system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/goes_conus-filenames-with-crs.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_conus-filenames-with-crs.csv --acl public-read"))
+# readr::write_csv(x = goes_meta_with_crs, file = here::here("data/out/goes_conus-filenames-with-crs.csv"))
+# 
+# system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/goes_conus-filenames-with-crs.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_conus-filenames-with-crs.csv --acl public-read"))
 
 (difftime(Sys.time(), start))
