@@ -63,6 +63,10 @@ subset_goes_to_california <- function(aws_url, local_path, scan_center, filebase
   unlink(here::here(local_path), force = TRUE)
   unlink(glue::glue("{here::here()}/data/out/goes/california/{scan_center}_{filebasename}.csv"))
   
+  rm(this)
+  rm(this_ca)
+  rm(ca_goes_geom)
+  gc()
   # return(terra::crs(this)[[1]])
   return(NULL)
 }
@@ -73,20 +77,23 @@ processed_goes <-
   dplyr::mutate(filename_full = stringr::str_sub(string = aws_files_raw, start = 32),
                 filename = stringr::str_sub(string = filename_full, start = 45, end = -1))
 
+n_workers <- 6
+
 goes_meta_with_crs_batches <-
   goes_meta %>% 
   dplyr::mutate(processed_name = glue::glue("{scan_center}_{filebasename}.csv")) %>% 
   dplyr::filter(!(processed_name %in% processed_goes$filename)) %>% 
-  dplyr::group_by(group = sample(x = 1:96, size = nrow(.), replace = TRUE)) %>% 
+  dplyr::group_by(group = sample(x = 1:n_workers, size = nrow(.), replace = TRUE)) %>% 
   dplyr::group_split()
 
 (start <- Sys.time())
-future::plan(strategy = "multiprocess", workers = 96)
+future::plan(strategy = "multiprocess", workers = n_workers)
 
-furrr::future_map(goes_meta_with_crs_batches, .f = function(x) {
-  purrr::pmap(x, .f = subset_goes_to_california)
+furrr::future_walk(goes_meta_with_crs_batches, .f = function(x) {
+  x %>% dplyr::slice(1:20) %>% purrr::pwalk(.f = subset_goes_to_california)
 })
 
+future::plan(strategy = "sequential")
 # readr::write_csv(x = goes_meta_with_crs, file = here::here("data/out/goes_conus-filenames-with-crs.csv"))
 # 
 # system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/goes_conus-filenames-with-crs.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_conus-filenames-with-crs.csv --acl public-read"))
