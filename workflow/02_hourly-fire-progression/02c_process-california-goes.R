@@ -85,7 +85,7 @@ processed_goes <-
   dplyr::mutate(filename_full = stringr::str_sub(string = aws_files_raw, start = 32),
                 filename = stringr::str_sub(string = filename_full, start = 45, end = -1))
 
-n_workers <- 1
+n_workers <- 10
 
 goes_meta_with_crs_batches <-
   goes_meta %>% 
@@ -99,18 +99,14 @@ future::plan(strategy = "multiprocess", workers = n_workers)
 
 furrr::future_walk(goes_meta_with_crs_batches, .f = function(x) {
   # x %>% dplyr::slice(1:20) %>% purrr::pwalk(.f = subset_goes_to_california)
-  for (i in 1:20) {
+  for (i in 1:nrow(x)) {
     
-    aws_url <- x$aws_url[i]
-    local_path <- x$local_path[i]
-    scan_center <- x$scan_center[i]
-    filebasename <- x$filebasename[i]
-    
-    subset_goes_to_california(aws_url, local_path, scan_center, filebasename)
+    subset_goes_to_california(aws_url = x$aws_url[i], 
+                              local_path = x$local_path[i], 
+                              scan_center = x$scan_center[i], 
+                              filebasename = x$filebasename[i])
   }
 })
-
-i = 1
 
 future::plan(strategy = "sequential")
 # readr::write_csv(x = goes_meta_with_crs, file = here::here("data/out/goes_conus-filenames-with-crs.csv"))
