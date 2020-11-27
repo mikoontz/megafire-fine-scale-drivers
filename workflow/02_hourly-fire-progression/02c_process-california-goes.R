@@ -98,14 +98,7 @@ goes_meta_with_crs_batches <-
 future::plan(strategy = "multiprocess", workers = n_workers)
 
 furrr::future_walk(goes_meta_with_crs_batches, .f = function(x) {
-  # x %>% dplyr::slice(1:20) %>% purrr::pwalk(.f = subset_goes_to_california)
-  for (i in 1:nrow(x)) {
-    
-    subset_goes_to_california(aws_url = x$aws_url[i], 
-                              local_path = x$local_path[i], 
-                              scan_center = x$scan_center[i], 
-                              filebasename = x$filebasename[i])
-  }
+  purrr::pwalk(.l = x, .f = subset_goes_to_california)
 })
 
 future::plan(strategy = "sequential")
