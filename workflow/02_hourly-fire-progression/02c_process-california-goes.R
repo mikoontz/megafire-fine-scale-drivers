@@ -30,28 +30,36 @@ fire_flags <-
   dplyr::filter(stringr::str_detect(flag_meanings, pattern = "no_fire_pixel", negate = TRUE)) %>% 
   dplyr::pull(flag_vals)
 
+expected_cols <- c("x", "y", "Area", "Temp", "Mask", "Power", "DQF", "cell")
+
 subset_goes_to_california <- function(aws_url, local_path, scan_center, filebasename, ...) {
   # download all the raw .nc files for the goes detections
   system2(command = "aws", args = glue::glue("s3 cp {aws_url} {here::here(local_path)} --no-sign-request"))
   
-  this <- terra::rast(here::here(local_path))
+  this <- stars::read_stars(here::here(local_path))
   
   ca_goes_geom <- 
-    sf::st_transform(california_geom, crs = terra::crs(this)) %>% 
-    sf::st_set_crs(NA) %>% # need to use this weird trick because terra doesn't do well with sf CRS's right now
-    terra::vect()
-  
-  terra::crs(ca_goes_geom) <- terra::crs(this) # finish the trick by setting the crs to what we know it is
+    sf::st_transform(california_geom, crs = sf::st_crs(this))
   
   this_ca <-
     this %>% 
-    terra::crop(ca_goes_geom) %>% # crop to just California
-    terra::mask(mask = ca_goes_geom) %>%  # mask out all the cells outside california (turn to NA)
-    as.data.frame(xy = TRUE, cell = TRUE) %>%  # convert to data frame
+    sf::st_crop(ca_goes_geom) %>% # crop to just California
+    dplyr::mutate(cell = 1:prod(dim(.))) %>% # explicitly add the 'cell number' by multiplying nrow by ncol
+    as_tibble()
+  
+  missing_cols <- expected_cols[!(expected_cols %in% names(this_ca))]
+  
+  for (j in seq_along(missing_cols)) {
+    this_ca[, missing_cols[j]] <- NA_real_
+  }
+  
+  this_ca <-
+    this_ca %>% 
+    dplyr::select(expected_cols) %>%  # convert to data frame
     dplyr::filter(!is.na(Mask)) %>%  # filter out all of the masked cells
     dplyr::filter(Mask %in% fire_flags) %>% # filter to just fire pixels
-    sf::st_as_sf(coords = c("x", "y"), crs = terra::crs(this), remove = FALSE) %>% 
-    sf::st_transform(crs = sf::st_crs(3310)$wkt) %>% 
+    sf::st_as_sf(coords = c("x", "y"), crs = sf::st_crs(this), remove = FALSE) %>% 
+    sf::st_transform(crs = sf::st_crs(3310)) %>% 
     dplyr::mutate(x_3310 = sf::st_coordinates(.)[, 1],
                   y_3310 = sf::st_coordinates(.)[, 2]) %>%
     sf::st_drop_geometry()
@@ -77,7 +85,7 @@ processed_goes <-
   dplyr::mutate(filename_full = stringr::str_sub(string = aws_files_raw, start = 32),
                 filename = stringr::str_sub(string = filename_full, start = 45, end = -1))
 
-n_workers <- 6
+n_workers <- 1
 
 goes_meta_with_crs_batches <-
   goes_meta %>% 
@@ -90,8 +98,19 @@ goes_meta_with_crs_batches <-
 future::plan(strategy = "multiprocess", workers = n_workers)
 
 furrr::future_walk(goes_meta_with_crs_batches, .f = function(x) {
-  x %>% dplyr::slice(1:20) %>% purrr::pwalk(.f = subset_goes_to_california)
+  # x %>% dplyr::slice(1:20) %>% purrr::pwalk(.f = subset_goes_to_california)
+  for (i in 1:20) {
+    
+    aws_url <- x$aws_url[i]
+    local_path <- x$local_path[i]
+    scan_center <- x$scan_center[i]
+    filebasename <- x$filebasename[i]
+    
+    subset_goes_to_california(aws_url, local_path, scan_center, filebasename)
+  }
 })
+
+i = 1
 
 future::plan(strategy = "sequential")
 # readr::write_csv(x = goes_meta_with_crs, file = here::here("data/out/goes_conus-filenames-with-crs.csv"))
