@@ -85,7 +85,9 @@ processed_goes <-
   dplyr::mutate(filename_full = stringr::str_sub(string = aws_files_raw, start = 32),
                 filename = stringr::str_sub(string = filename_full, start = 45, end = -1))
 
-n_workers <- 10
+nrow(processed_goes) # how many have been processed?
+
+n_workers <- 15
 
 goes_meta_with_crs_batches <-
   goes_meta %>% 
@@ -93,6 +95,10 @@ goes_meta_with_crs_batches <-
   dplyr::filter(!(processed_name %in% processed_goes$filename)) %>% 
   dplyr::group_by(group = sample(x = 1:n_workers, size = nrow(.), replace = TRUE)) %>% 
   dplyr::group_split()
+
+# remove all variables no longer needed (in case they get copied over to each core?)
+rm(processed_goes)
+rm(goes_meta)
 
 (start <- Sys.time())
 future::plan(strategy = "multiprocess", workers = n_workers)
@@ -102,8 +108,5 @@ furrr::future_walk(goes_meta_with_crs_batches, .f = function(x) {
 })
 
 future::plan(strategy = "sequential")
-# readr::write_csv(x = goes_meta_with_crs, file = here::here("data/out/goes_conus-filenames-with-crs.csv"))
-# 
-# system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/goes_conus-filenames-with-crs.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_conus-filenames-with-crs.csv --acl public-read"))
 
 (difftime(Sys.time(), start))
