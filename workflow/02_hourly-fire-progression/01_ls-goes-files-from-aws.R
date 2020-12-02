@@ -13,20 +13,17 @@ ls_goes <- function(target_goes, get_latest_goes = FALSE) {
   if(get_latest_goes | !file.exists(here::here("data/out/goes_conus-filenames.csv"))) {
     # GOES-16 record begins on 2017-05-24
     
-    goes16_raw_files <- 
-      list.files("data/raw/goes16/")
-    
-    goes17_raw_files <- 
-      list.files("data/raw/goes17/")
+    goes_raw_files <- 
+      list.files(glue::glue("data/raw/{target_goes}"), recursive = TRUE, full.names = TRUE)
     
     # bundle the list of filenames and extract some attributes from the
     # metadata embedded in those filenames
     goes_af <-
       tibble::tibble(target_goes = target_goes,
-                     aws_path_raw = goes_aws_files,
-                     aws_path = stringr::str_sub(string = aws_path_raw, start = 32, end = -1),
-                     data_timestamp = stringr::str_sub(string = aws_path_raw, start = 1, end = 19)) %>% 
-      tidyr::separate(col = aws_path, into = c("data_product", "year", "doy", "hour", "filename"), sep = "/", remove = FALSE) %>% 
+                     data_product = "ABI-L2-FDCC",
+                     local_path_full = goes_raw_files,
+                     aws_file = stringr::str_sub(string = local_path_full, start = 17, end = -1)) %>% 
+      tidyr::separate(col = aws_file, into = c("year", "doy", "hour", "filename"), sep = "/", remove = FALSE) %>% 
       dplyr::mutate(doy = as.numeric(doy), year = as.numeric(year)) %>% 
       dplyr::mutate(tmp_date = as.Date(doy, origin = glue::glue("{year}-01-01")),
                     month = lubridate::month(tmp_date),
@@ -61,7 +58,7 @@ ls_goes <- function(target_goes, get_latest_goes = FALSE) {
                                          stringr::str_pad(string = hour, width = 2, side = 'left', pad = '0'),
                                          stringr::str_pad(string = min, width = 2, side = 'left', pad = '0'),
                                          stringr::str_pad(string = sec, width = 2, side = 'left', pad = '0'))) %>% 
-      dplyr::select(target_goes, data_product, year, month, day, hour, min, sec, doy, filename, scan_start_full, scan_end_full, scan_center_full, scan_start, scan_end, scan_center, aws_path,  aws_path_raw)
+      dplyr::select(target_goes, data_product, year, month, day, hour, min, sec, doy, filename, scan_start_full, scan_end_full, scan_center_full, scan_start, scan_end, scan_center, local_path_full, aws_file)
     
   } # end if statement checking if file exists
 } # end function
