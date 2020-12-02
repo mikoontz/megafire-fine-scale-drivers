@@ -65,14 +65,9 @@ ls_goes <- function(target_goes, get_latest_goes = FALSE) {
   } # end if statement checking if file exists
 } # end function
 
-
 target_goes <- c("goes16", "goes17")
 
-goes_meta <- 
-  purrr::map_dfr(target_goes, .f = aws_ls_goes, get_latest_goes = TRUE) %>% 
-  dplyr::mutate(filebasename = stringr::str_sub(filename, start = 1, end = -4)) %>% 
-  dplyr::mutate(aws_url = glue::glue("s3://noaa-{target_goes}/{aws_path}"),
-                local_path = glue::glue("data/raw/goes/california/{scan_center}_{filename}"))
+goes_meta <- purrr::map_dfr(target_goes, .f = ls_goes, get_latest_goes = TRUE)
 
 readr::write_csv(x = goes_meta, file = here::here("data/out/goes_conus-filenames.csv"))
 
@@ -98,21 +93,16 @@ readr::write_csv(x = goes_meta, file = here::here("data/out/goes_conus-filenames
 if(!file.exists(here::here("data/out/goes-mask-meanings.csv")) | !file.exists(here::here("data/out/goes-dqf-meanings.csv"))) {
 
   # Get example .nc file
-  ex_aws_path <- goes_meta$aws_url[1]
-  ex_filename <- goes_meta$filename[1]
-  ex_local_path <- here::here("data/raw/goes-example.nc")
-  ex_local_path <- "data/raw/goes-example.nc"
+  ex_local_path_full <- goes_meta$local_path_full[1]
   
-  system2(command = "aws", args = glue::glue("s3 cp {ex_aws_path} {here::here(ex_local_path)} --no-sign-request"))
-  
-  this_nc <- ncdf4::nc_open(ex_local_path) %>% ncdf4::ncatt_get(varid = "Mask")
+  this_nc <- ncdf4::nc_open(ex_local_path_full) %>% ncdf4::ncatt_get(varid = "Mask")
   flag_vals <- this_nc[["flag_values"]]
   flag_meanings <- this_nc[["flag_meanings"]] %>% stringr::str_split(pattern = " ", simplify = TRUE) %>% as.vector()
   flag_df <- data.frame(flag_vals, flag_meanings)
   
   readr::write_csv(x = flag_df, file = here::here("data/out/goes-mask-meanings.csv"))
   
-  this_nc <- ncdf4::nc_open(ex_local_path) %>% ncdf4::ncatt_get(varid = "DQF")
+  this_nc <- ncdf4::nc_open(ex_local_path_full) %>% ncdf4::ncatt_get(varid = "DQF")
   flag_vals <- this_nc[["flag_values"]]
   flag_meanings <- this_nc[["flag_meanings"]] %>% stringr::str_split(pattern = " ", simplify = TRUE) %>% as.vector()
   flag_df <- data.frame(flag_vals, flag_meanings)
@@ -120,3 +110,9 @@ if(!file.exists(here::here("data/out/goes-mask-meanings.csv")) | !file.exists(he
   readr::write_csv(x = flag_df, file = here::here("data/out/goes-dqf-meanings.csv"))
   
 }
+
+system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/goes_conus-filenames.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_conus-filenames.csv --acl public-read"))
+
+system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/goes-mask-meanings.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes-mask-meanings.csv --acl public-read"))
+
+system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/goes-dqf-meanings.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes-dqf-meanings.csv  --acl public-read"))
