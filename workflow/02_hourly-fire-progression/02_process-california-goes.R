@@ -14,8 +14,6 @@ require(USAboundariesData)
 
 dir.create(here::here("data/out/goes/california"), recursive = TRUE, showWarnings = FALSE)
 
-# source("workflow/00_credentials.R")
-
 if(!file.exists(here::here("data/out/goes_conus-filenames.csv")) | !file.exists(here::here("data/out/goes-mask-meanings.csv")) | !file.exists(here::here("data/out/goes-dqf-meanings.csv"))) {
   # GOES-16 record begins on 2017-05-24
   system2(command = "aws", args = glue::glue("s3 cp s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_conus-filenames.csv {here::here()}/data/out/goes_conus-filenames.csv"))
@@ -26,7 +24,7 @@ if(!file.exists(here::here("data/out/goes_conus-filenames.csv")) | !file.exists(
 }
 
 # Read in the GOES metadata acquired from Amazon Earth using 01_ls-goes-files-from-aws.R script
-goes_meta <- readr::read_csv(file = here::here("data/out/goes_conus-filenames.csv"), col_types = "cciiiiinicTTTcccccccc")
+goes_meta <- readr::read_csv(file = here::here("data/out/goes_conus-filenames.csv"), col_types = "cciiiiinicTTTccccccc")
 
 dir.create(here::here("data/raw/goes/california"), 
            showWarnings = FALSE, recursive = TRUE)
@@ -56,6 +54,7 @@ subset_goes_to_california <- function(local_path_full, processed_name, ...) {
   missing_cols <- expected_cols[!(expected_cols %in% names(this_ca))]
   
   for (j in seq_along(missing_cols)) {
+    print(local_path_full)
     this_ca[, missing_cols[j]] <- NA_real_
   }
   
@@ -80,21 +79,21 @@ subset_goes_to_california <- function(local_path_full, processed_name, ...) {
   return(NULL)
 }
 
-processed_goes <-
-  tibble::tibble(aws_files_raw = system2(command = "aws", args = glue::glue("s3 ls s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_california --recursive"), stdout = TRUE)) %>%
-  dplyr::filter(nchar(aws_files_raw) == 163) %>%
-  dplyr::mutate(filename_full = stringr::str_sub(string = aws_files_raw, start = 32),
-                filename = stringr::str_sub(string = filename_full, start = 45, end = -1))
+# processed_goes <-
+#   tibble::tibble(aws_files_raw = system2(command = "aws", args = glue::glue("s3 ls s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_california --recursive"), stdout = TRUE)) %>%
+#   dplyr::filter(nchar(aws_files_raw) == 163) %>%
+#   dplyr::mutate(filename_full = stringr::str_sub(string = aws_files_raw, start = 32),
+#                 filename = stringr::str_sub(string = filename_full, start = 45, end = -1))
+# 
+# nrow(processed_goes) # how many have been processed?
 
-nrow(processed_goes) # how many have been processed?
-
-n_workers <- 15
+n_workers <- 48
 
 goes_meta_with_crs_batches <-
   goes_meta %>% 
-  dplyr::mutate(processed_name = glue::glue("{scan_center}_{filebasename}.csv")) %>% 
-  dplyr::filter(!(processed_name %in% processed_goes$filename)) %>% 
-  dplyr::group_by(group = sample(x = 1:n_workers, size = nrow(.), replace = TRUE)) %>% 
+  # dplyr::filter(!(processed_name %in% processed_goes$filename)) %>%
+  dplyr::mutate(group = sample(x = 1:n_workers, size = nrow(.), replace = TRUE)) %>% 
+  dplyr::group_by(group) %>% 
   dplyr::group_split()
 
 # remove all variables no longer needed (in case they get copied over to each core?)
