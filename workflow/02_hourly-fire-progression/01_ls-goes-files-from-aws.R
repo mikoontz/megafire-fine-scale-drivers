@@ -9,14 +9,15 @@ sapply(dependencies[needs_install], FUN = require, character.only = TRUE)
 dir.create(here::here("data/out/"), recursive = TRUE, showWarnings = FALSE)
 dir.create(here::here("data/raw/"), recursive = TRUE, showWarnings = FALSE)
 
-aws_ls_goes <- function(target_goes, get_latest_goes = FALSE) {
+ls_goes <- function(target_goes, get_latest_goes = FALSE) {
   if(get_latest_goes | !file.exists(here::here("data/out/goes_conus-filenames.csv"))) {
     # GOES-16 record begins on 2017-05-24
-    # List all the GOES-16 files available on AWS
-    # Takes 13 seconds for the 2017 data (May to December)
-    # Takes 20 seconds for the 2018 data (full year)
-    goes_aws_files <- 
-      system2(command = "aws", args = glue::glue("s3 ls noaa-{target_goes}/ABI-L2-FDCC/ --recursive --no-sign-request"), stdout = TRUE)
+    
+    goes16_raw_files <- 
+      list.files("data/raw/goes16/")
+    
+    goes17_raw_files <- 
+      list.files("data/raw/goes17/")
     
     # bundle the list of filenames and extract some attributes from the
     # metadata embedded in those filenames
