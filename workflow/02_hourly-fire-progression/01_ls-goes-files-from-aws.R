@@ -24,6 +24,7 @@ ls_goes <- function(target_goes, get_latest_goes = FALSE) {
                      local_path_full = goes_raw_files,
                      aws_file = stringr::str_sub(string = local_path_full, start = 17, end = -1)) %>% 
       tidyr::separate(col = aws_file, into = c("year", "doy", "hour", "filename"), sep = "/", remove = FALSE) %>% 
+      dplyr::mutate(filebasename = stringr::str_sub(string = filename, start = 1, end = -4)) %>% 
       dplyr::mutate(doy = as.numeric(doy), year = as.numeric(year)) %>% 
       dplyr::mutate(tmp_date = as.Date(doy, origin = glue::glue("{year}-01-01")),
                     month = lubridate::month(tmp_date),
@@ -57,8 +58,9 @@ ls_goes <- function(target_goes, get_latest_goes = FALSE) {
                                          stringr::str_pad(string = day, width = 2, side = 'left', pad = '0'),
                                          stringr::str_pad(string = hour, width = 2, side = 'left', pad = '0'),
                                          stringr::str_pad(string = min, width = 2, side = 'left', pad = '0'),
-                                         stringr::str_pad(string = sec, width = 2, side = 'left', pad = '0'))) %>% 
-      dplyr::select(target_goes, data_product, year, month, day, hour, min, sec, doy, filename, scan_start_full, scan_end_full, scan_center_full, scan_start, scan_end, scan_center, local_path_full, aws_file)
+                                         stringr::str_pad(string = sec, width = 2, side = 'left', pad = '0')),
+                    processed_filename = glue::glue("{scan_center}_{filebasename}.csv")) %>% 
+      dplyr::select(target_goes, data_product, year, month, day, hour, min, sec, doy, filename, scan_start_full, scan_end_full, scan_center_full, scan_start, scan_end, scan_center, local_path_full, processed_filename, filebasename, aws_file)
     
   } # end if statement checking if file exists
 } # end function
