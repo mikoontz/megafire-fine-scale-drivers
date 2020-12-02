@@ -9,8 +9,8 @@ sapply(dependencies[needs_install], FUN = require, character.only = TRUE)
 dir.create(here::here("data/out/"), recursive = TRUE, showWarnings = FALSE)
 dir.create(here::here("data/raw/"), recursive = TRUE, showWarnings = FALSE)
 
-ls_goes <- function(target_goes, get_latest_goes = FALSE) {
-  if(get_latest_goes | !file.exists(here::here("data/out/goes_conus-filenames.csv"))) {
+ls_goes <- function(target_goes) {
+  if(!file.exists(here::here("data/out/goes_conus-filenames.csv"))) {
     # GOES-16 record begins on 2017-05-24
     
     goes_raw_files <- 
@@ -67,7 +67,7 @@ ls_goes <- function(target_goes, get_latest_goes = FALSE) {
 
 target_goes <- c("goes16", "goes17")
 
-goes_meta <- purrr::map_dfr(target_goes, .f = ls_goes, get_latest_goes = TRUE)
+goes_meta <- purrr::map_dfr(target_goes, .f = ls_goes)
 
 readr::write_csv(x = goes_meta, file = here::here("data/out/goes_conus-filenames.csv"))
 
