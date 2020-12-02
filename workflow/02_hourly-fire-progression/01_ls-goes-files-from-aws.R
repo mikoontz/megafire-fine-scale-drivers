@@ -64,12 +64,10 @@ ls_goes <- function(target_goes) {
 
 target_goes <- c("goes16", "goes17")
 
-if(!file.exists(here::here("data/out/goes_conus-filenames.csv"))) {
-  # GOES-16 record begins on 2017-05-24
-  goes_meta <- purrr::map_dfr(target_goes, .f = ls_goes)
-  
-  readr::write_csv(x = goes_meta, file = here::here("data/out/goes_conus-filenames.csv"))
-}
+goes_meta <- purrr::map_dfr(target_goes, .f = ls_goes)
+
+readr::write_csv(x = goes_meta, file = here::here("data/out/goes_conus-filenames.csv"))
+
 ### write the Mask and DQF meanings to disk
 
 # GOES-16 and GOES-17

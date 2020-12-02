@@ -16,6 +16,15 @@ dir.create(here::here("data/out/goes/california"), recursive = TRUE, showWarning
 
 # source("workflow/00_credentials.R")
 
+if(!file.exists(here::here("data/out/goes_conus-filenames.csv")) | !file.exists(here::here("data/out/goes-mask-meanings.csv")) | !file.exists(here::here("data/out/goes-dqf-meanings.csv"))) {
+  # GOES-16 record begins on 2017-05-24
+  system2(command = "aws", args = glue::glue("s3 cp s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_conus-filenames.csv {here::here()}/data/out/goes_conus-filenames.csv"))
+  
+  system2(command = "aws", args = glue::glue("s3 cp s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes-mask-meanings.csv {here::here()}/data/out/goes-mask-meanings.csv"))
+  
+  system2(command = "aws", args = glue::glue("s3 cp s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes-dqf-meanings.csv {here::here()}/data/out/goes-dqf-meanings.csv"))
+}
+
 # Read in the GOES metadata acquired from Amazon Earth using 01_ls-goes-files-from-aws.R script
 goes_meta <- readr::read_csv(file = here::here("data/out/goes_conus-filenames.csv"), col_types = "cciiiiinicTTTcccccccc")
 
@@ -32,11 +41,8 @@ fire_flags <-
 
 expected_cols <- c("x", "y", "Area", "Temp", "Mask", "Power", "DQF", "cell")
 
-subset_goes_to_california <- function(aws_url, local_path, scan_center, filebasename, ...) {
-  # download all the raw .nc files for the goes detections
-  system2(command = "aws", args = glue::glue("s3 cp {aws_url} {here::here(local_path)} --no-sign-request"))
-  
-  this <- stars::read_stars(here::here(local_path))
+subset_goes_to_california <- function(local_path_full, processed_name, ...) {
+  this <- stars::read_stars(here::here(local_path_full))
   
   ca_goes_geom <- 
     sf::st_transform(california_geom, crs = sf::st_crs(this))
@@ -64,18 +70,13 @@ subset_goes_to_california <- function(aws_url, local_path, scan_center, filebase
                   y_3310 = sf::st_coordinates(.)[, 2]) %>%
     sf::st_drop_geometry()
   
-  readr::write_csv(x = this_ca, file = glue::glue("{here::here()}/data/out/goes/california/{scan_center}_{filebasename}.csv"))
-  
-  system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/goes/california/{scan_center}_{filebasename}.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes_california/{scan_center}_{filebasename}.csv --acl public-read"), stdout = FALSE)
-  
-  unlink(here::here(local_path), force = TRUE)
-  unlink(glue::glue("{here::here()}/data/out/goes/california/{scan_center}_{filebasename}.csv"))
+  readr::write_csv(x = this_ca, file = glue::glue("{here::here()}/data/out/goes/california/{processed_filename}"))
   
   rm(this)
   rm(this_ca)
   rm(ca_goes_geom)
   gc()
-  # return(terra::crs(this)[[1]])
+  
   return(NULL)
 }
 
