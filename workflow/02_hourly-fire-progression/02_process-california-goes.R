@@ -114,14 +114,8 @@ goes_with_crs <-
   purrr::pmap_dfr(.l = x, .f = subset_goes_to_california)
 })
 
-system2(command = "aws", args = glue::glue("s3 sync {here::here()}data/out/goes/california s3://earthlab-mkoontz/megafire-fine-scale-drivers"), stdout = FALSE)
-
-
-# goes_with_crs <-
-#   furrr::future_map_dfr(goes_meta_with_crs_batches, .f = function(x) {
-#     purrr::pmap_dfr(.l = x, .f = get_goes_crs)
-#   })
-
 future::plan(strategy = "sequential")
+
+system2(command = "aws", args = glue::glue("s3 sync {here::here()}data/out/goes/california s3://earthlab-mkoontz/megafire-fine-scale-drivers"), stdout = FALSE)
 
 (difftime(Sys.time(), start))
