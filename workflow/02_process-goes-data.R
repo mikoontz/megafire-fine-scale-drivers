@@ -139,6 +139,8 @@ create_mask_lookup_table <- function(target_goes, year, upload = TRUE) {
   
   if(!file.exists(here::here("data/out/goes-mask-meanings.csv")) | !file.exists(here::here("data/out/goes-dqf-meanings.csv"))) {
     
+    goes_af <- readr::read_csv(file = glue::glue("{here::here()}/data/out/{target_goes}_{year}_conus-filenames.csv"))
+    
     # Get example .nc file
     ex_local_path_full <- goes_af$local_path_full[1]
     
