@@ -37,7 +37,7 @@ dir.create(here::here("data/out/goes_california"), recursive = TRUE, showWarning
 
 california_geom <- USAboundaries::us_states(resolution = "high", states = "California")
 expected_cols <- c("x", "y", "Area", "Temp", "Mask", "Power", "DQF", "cell")
-n_workers <- 4 # number of cores to split the GOES subsetting process up into
+n_workers <- 48 # number of cores to split the GOES subsetting process up into
 
 #### Functions ####
 
@@ -211,11 +211,6 @@ subset_goes_to_california <- function(local_path_full, processed_filename, ...) 
   
   crs_df <- data.frame(local_path_full, processed_filename, crs = this_crs)
   
-  # rm(this)
-  # rm(this_ca)
-  # rm(ca_goes_geom)
-  # gc()
-  
   return(crs_df)
 }
 
@@ -242,8 +237,8 @@ for (i in 1:nrow(goes_year_buckets)) {
   dir.create(glue::glue("{here::here()}/data/out/california_goes/{target_goes}_{year}/"), recursive = TRUE, showWarnings = FALSE)
   
   sync_goes(target_goes, year)
-  goes_meta <- ls_goes(target_goes, year, upload = FALSE)
-  fire_flags <- create_mask_lookup_table(target_goes, year, upload = FALSE)
+  goes_meta <- ls_goes(target_goes, year, upload = TRUE)
+  fire_flags <- create_mask_lookup_table(target_goes, year, upload = TRUE)
   
   # set up batches of goes metadata to iterate over for processing
   goes_meta_batches <-
