@@ -177,7 +177,7 @@ create_mask_lookup_table <- function(target_goes, year, upload = TRUE) {
 }
 #### subset GOES images to fire detections in California
 
-subset_goes_to_california <- function(local_path_full, processed_filename, ...) {
+subset_goes_to_california <- function(local_path_full, processed_filename, target_goes, year, ...) {
   this <- stars::read_stars(here::here(local_path_full))
   
   this_crs <- sf::st_crs(this)$wkt
@@ -258,7 +258,7 @@ for (i in 1:nrow(goes_year_buckets)) {
   goes_with_crs <-
     furrr::future_map_dfr(goes_meta_batches, .f = function(x) {
       x %>% 
-        dplyr::select(local_path_full, processed_filename) %>% 
+        dplyr::select(local_path_full, processed_filename, target_goes, year) %>% 
         purrr::pmap_dfr(.f = subset_goes_to_california)
     })
   
