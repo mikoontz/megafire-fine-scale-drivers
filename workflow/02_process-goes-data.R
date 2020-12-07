@@ -31,7 +31,7 @@ require(USAboundariesData)
 #### Create directories
 dir.create(here::here("data/out/"), recursive = TRUE, showWarnings = FALSE)
 dir.create(here::here("data/raw/"), recursive = TRUE, showWarnings = FALSE)
-dir.create(here::here("data/out/goes_california"), recursive = TRUE, showWarnings = FALSE)
+dir.create(here::here("data/out/california_goes"), recursive = TRUE, showWarnings = FALSE)
 
 #### Global variables ####
 
@@ -167,13 +167,18 @@ create_mask_lookup_table <- function(target_goes, year, upload = TRUE) {
     }
   }
   
-  fire_flags <- 
+  # fire_flags <- 
+  #   readr::read_csv(file = here::here("data/out/goes-mask-meanings.csv")) %>% 
+  #   dplyr::filter(stringr::str_detect(flag_meanings, pattern = "_fire_pixel")) %>% 
+  #   dplyr::filter(stringr::str_detect(flag_meanings, pattern = "no_fire_pixel", negate = TRUE)) %>% 
+  #   dplyr::pull(flag_vals)
+  
+  no_fire_flags <-
     readr::read_csv(file = here::here("data/out/goes-mask-meanings.csv")) %>% 
-    dplyr::filter(stringr::str_detect(flag_meanings, pattern = "_fire_pixel")) %>% 
-    dplyr::filter(stringr::str_detect(flag_meanings, pattern = "no_fire_pixel", negate = TRUE)) %>% 
+    dplyr::filter(stringr::str_detect(flag_meanings, pattern = "no_fire_pixel")) %>% 
     dplyr::pull(flag_vals)
   
-  return(fire_flags)
+  return(no_fire_flags)
 }
 #### subset GOES images to fire detections in California
 
@@ -202,7 +207,8 @@ subset_goes_to_california <- function(local_path_full, processed_filename, targe
     this_ca %>% 
     dplyr::select(dplyr::all_of(expected_cols)) %>%  # convert to data frame
     dplyr::filter(!is.na(Mask)) %>%  # filter out all of the masked cells
-    dplyr::filter(Mask %in% fire_flags) %>% # filter to just fire pixels
+    dplyr::filter(!(Mask %in% no_fire_flags)) %>% # filter out all pixels that are correcly processed but reported as "not fire" 
+    # dplyr::filter(Mask %in% fire_flags) %>% # filter to just fire pixels
     sf::st_as_sf(coords = c("x", "y"), crs = sf::st_crs(this), remove = FALSE) %>% 
     sf::st_transform(crs = sf::st_crs(3310)) %>% 
     dplyr::mutate(x_3310 = sf::st_coordinates(.)[, 1],
@@ -239,8 +245,8 @@ for (i in 1:nrow(goes_year_buckets)) {
   dir.create(glue::glue("{here::here()}/data/out/california_goes/{target_goes}_{year}/"), recursive = TRUE, showWarnings = FALSE)
   
   sync_goes(target_goes, year)
-  goes_meta <- ls_goes(target_goes, year, upload = TRUE)
-  fire_flags <- create_mask_lookup_table(target_goes, year, upload = TRUE)
+  goes_meta <- ls_goes(target_goes, year, upload = FALSE)
+  no_fire_flags <- create_mask_lookup_table(target_goes, year, upload = FALSE)
   
   # set up batches of goes metadata to iterate over for processing
   goes_meta_batches <-
@@ -270,6 +276,6 @@ for (i in 1:nrow(goes_year_buckets)) {
   
   system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/{target_goes}_{year}_conus-crs.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/{target_goes}_{year}_conus-crs.csv --acl public-read"))
   
-  system2(command = "aws", args = glue::glue("s3 sync {here::here()}/data/out/ s3://earthlab-mkoontz/megafire-fine-scale-drivers/california_goes/{target_goes}_{year}/ --acl public-read"))
+  system2(command = "aws", args = glue::glue("s3 sync {here::here()}/data/out/california_goes/{target_goes}_{year}/ s3://earthlab-mkoontz/megafire-fine-scale-drivers/california_goes/{target_goes}_{year}/ --acl public-read"))
   
 } # end for loop; move on to the next combination of target_goes/year
