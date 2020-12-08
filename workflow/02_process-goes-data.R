@@ -2,12 +2,14 @@
 # a time.
 
 #### Dependencies ####
-dependencies <- c("dplyr", 
+dependencies <- c("data.table",
+                  "dplyr", 
                   "furrr", "future",
                   "glue", 
                   "here",
                   "lubridate",
                   "ncdf4",
+                  "pbapply",
                   "purrr",
                   "readr", 
                   "sf", 
@@ -37,7 +39,11 @@ dir.create(here::here("data/out/california_goes"), recursive = TRUE, showWarning
 
 california_geom <- USAboundaries::us_states(resolution = "high", states = "California")
 expected_cols <- c("x", "y", "Area", "Temp", "Mask", "Power", "DQF", "cell")
-n_workers <- 48 # number of cores to split the GOES subsetting process up into
+n_workers <- 6 # number of cores to split the GOES subsetting process up into
+pbo <- pbapply::pboptions() # original pbapply options (to easily reset)
+# becomes the multiplier for how many list items the goes
+# metadata gets broken down into; e.g., total number of list items = n_workers * pb_precision
+pb_precision <- 10 
 
 #### Functions ####
 
@@ -182,42 +188,52 @@ create_mask_lookup_table <- function(target_goes, year, upload = TRUE) {
 }
 #### subset GOES images to fire detections in California
 
-subset_goes_to_california <- function(local_path_full, processed_filename, target_goes, year, ...) {
-  this <- stars::read_stars(here::here(local_path_full))
+subset_goes_to_california <- function(this_batch, target_goes, year, california_geom, expected_cols, no_fire_flags) {
   
-  this_crs <- sf::st_crs(this)$wkt
+  out <- vector(mode = "list", length = nrow(this_batch))
   
-  ca_goes_geom <- 
-    sf::st_transform(california_geom, crs = sf::st_crs(this))
-  
-  this_ca <-
-    this %>% 
-    sf::st_crop(ca_goes_geom) %>% # crop to just California
-    dplyr::mutate(cell = 1:prod(dim(.))) %>% # explicitly add the 'cell number' by multiplying nrow by ncol
-    as_tibble()
-  
-  missing_cols <- expected_cols[!(expected_cols %in% names(this_ca))]
-  
-  for (j in seq_along(missing_cols)) {
-    print(local_path_full)
-    this_ca[, missing_cols[j]] <- NA_real_
+  for (k in 1:nrow(this_batch)) {
+    local_path_full <- this_batch$local_path_full[k]
+    processed_filename <- this_batch$processed_filename[k]
+    
+    this <- stars::read_stars(here::here(local_path_full), quiet = TRUE)
+    
+    this_crs <- sf::st_crs(this)$wkt
+    
+    ca_goes_geom <- 
+      sf::st_transform(california_geom, crs = sf::st_crs(this))
+    
+    this_ca <-
+      this %>% 
+      sf::st_crop(ca_goes_geom) %>% # crop to just California
+      dplyr::mutate(cell = 1:prod(dim(.))) %>% # explicitly add the 'cell number' by multiplying nrow by ncol
+      as_tibble()
+    
+    missing_cols <- expected_cols[!(expected_cols %in% names(this_ca))]
+    
+    for (j in seq_along(missing_cols)) {
+      print(local_path_full)
+      this_ca[, missing_cols[j]] <- NA_real_
+    }
+    
+    this_ca <-
+      this_ca %>% 
+      dplyr::select(dplyr::all_of(expected_cols)) %>%  # convert to data frame
+      dplyr::filter(!is.na(Mask)) %>%  # filter out all of the masked cells
+      dplyr::filter(!(Mask %in% no_fire_flags)) %>% # filter out all pixels that are correcly processed but reported as "not fire" 
+      # dplyr::filter(Mask %in% fire_flags) %>% # filter to just fire pixels
+      sf::st_as_sf(coords = c("x", "y"), crs = sf::st_crs(this), remove = FALSE) %>% 
+      sf::st_transform(crs = sf::st_crs(3310)) %>% 
+      dplyr::mutate(x_3310 = sf::st_coordinates(.)[, 1],
+                    y_3310 = sf::st_coordinates(.)[, 2]) %>%
+      sf::st_drop_geometry()
+    
+    readr::write_csv(x = this_ca, file = glue::glue("{here::here()}/data/out/california_goes/{target_goes}_{year}/{processed_filename}"))
+    
+    out[[k]] <- dplyr::tibble(local_path_full, processed_filename, crs = this_crs)
   }
   
-  this_ca <-
-    this_ca %>% 
-    dplyr::select(dplyr::all_of(expected_cols)) %>%  # convert to data frame
-    dplyr::filter(!is.na(Mask)) %>%  # filter out all of the masked cells
-    dplyr::filter(!(Mask %in% no_fire_flags)) %>% # filter out all pixels that are correcly processed but reported as "not fire" 
-    # dplyr::filter(Mask %in% fire_flags) %>% # filter to just fire pixels
-    sf::st_as_sf(coords = c("x", "y"), crs = sf::st_crs(this), remove = FALSE) %>% 
-    sf::st_transform(crs = sf::st_crs(3310)) %>% 
-    dplyr::mutate(x_3310 = sf::st_coordinates(.)[, 1],
-                  y_3310 = sf::st_coordinates(.)[, 2]) %>%
-    sf::st_drop_geometry()
-  
-  readr::write_csv(x = this_ca, file = glue::glue("{here::here()}/data/out/california_goes/{target_goes}_{year}/{processed_filename}"))
-  
-  crs_df <- data.frame(local_path_full, processed_filename, crs = this_crs)
+  crs_df <- data.table::rbindlist(out)
   
   return(crs_df)
 }
@@ -244,31 +260,48 @@ for (i in 1:nrow(goes_year_buckets)) {
   
   dir.create(glue::glue("{here::here()}/data/out/california_goes/{target_goes}_{year}/"), recursive = TRUE, showWarnings = FALSE)
   
+  (start <- Sys.time())
   sync_goes(target_goes, year)
+  (difftime(time1 = Sys.time(), time2 = start, units = "mins"))
+  
   goes_meta <- ls_goes(target_goes, year, upload = FALSE)
-  no_fire_flags <- create_mask_lookup_table(target_goes, year, upload = FALSE)
+  no_fire_flags <- create_mask_lookup_table(target_goes, year, upload = TRUE)
   
   # set up batches of goes metadata to iterate over for processing
   goes_meta_batches <-
     goes_meta %>% 
-    dplyr::mutate(group = sample(x = 1:n_workers, size = nrow(.), replace = TRUE)) %>% 
+    dplyr::mutate(group = sample(x = 1:(n_workers * pb_precision), size = nrow(.), replace = TRUE)) %>% 
     dplyr::group_by(group) %>% 
     dplyr::group_split()
   
+  goes_meta_batches = goes_meta_batches[1:6]
+  
   # set up parallelization
-  (start <- Sys.time())
-  future::plan(strategy = "multiprocess", workers = n_workers)
+  # (start <- Sys.time())
+  # future::plan(strategy = "multiprocess", workers = n_workers)
+  # 
+  # # parallelize over batches (parallelize to put each batch on a separate core)
+  # # iterate over rows in the batch (this gets done sequentially on each core)
+  # 
+  # goes_with_crs <-
+  #   furrr::future_map(goes_meta_batches, .f = subset_goes_to_california,
+  #                     target_goes = target_goes, 
+  #                     year = year, 
+  #                     california_geom = california_geom, 
+  #                     expected_cols = expected_cols, 
+  #                     no_fire_flags = no_fire_flags)
+  # future::plan(strategy = "sequential")
+  # (difftime(time1 = Sys.time(), time2 = start, units = "mins"))
   
-  # parallelize over batches (parallelize to put each batch on a separate core)
-  # iterate over rows in the batch (this gets done sequentially on each core)
   goes_with_crs <-
-    furrr::future_map_dfr(goes_meta_batches, .f = function(x) {
-      x %>% 
-        dplyr::select(local_path_full, processed_filename, target_goes, year) %>% 
-        purrr::pmap_dfr(.f = subset_goes_to_california)
-    })
+    pbapply::pblapply(goes_meta_batches, cl = 6, FUN = subset_goes_to_california,
+                      target_goes = target_goes,
+                      year = year,
+                      california_geom = california_geom,
+                      expected_cols = expected_cols,
+                      no_fire_flags = no_fire_flags)
   
-  future::plan(strategy = "sequential")
+  # future::plan(strategy = "sequential")
   
   (difftime(time1 = Sys.time(), time2 = start, units = "mins"))
   
