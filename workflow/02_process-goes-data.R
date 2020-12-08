@@ -39,7 +39,7 @@ dir.create(here::here("data/out/california_goes"), recursive = TRUE, showWarning
 
 california_geom <- USAboundaries::us_states(resolution = "high", states = "California")
 expected_cols <- c("x", "y", "Area", "Temp", "Mask", "Power", "DQF", "cell")
-n_workers <- 6 # number of cores to split the GOES subsetting process up into
+n_workers <- 16 # number of cores to split the GOES subsetting process up into
 pbo <- pbapply::pboptions() # original pbapply options (to easily reset)
 
 # pb_precision becomes the multiplier for how many list items the goes
