@@ -41,9 +41,11 @@ california_geom <- USAboundaries::us_states(resolution = "high", states = "Calif
 expected_cols <- c("x", "y", "Area", "Temp", "Mask", "Power", "DQF", "cell")
 n_workers <- 6 # number of cores to split the GOES subsetting process up into
 pbo <- pbapply::pboptions() # original pbapply options (to easily reset)
-# becomes the multiplier for how many list items the goes
+
+# pb_precision becomes the multiplier for how many list items the goes
+# it represents the number of steps between a progress bar of 0 and a progress bar of 100%
 # metadata gets broken down into; e.g., total number of list items = n_workers * pb_precision
-pb_precision <- 10 
+pb_precision <- 100
 
 #### Functions ####
 
@@ -241,8 +243,6 @@ subset_goes_to_california <- function(this_batch, target_goes, year, california_
 #### End function to subset goes images to just fire detections in california
 
 
-
-
 goes_year_buckets <-
   lapply(c("goes16", "goes17"), FUN = function(target_goes) {
     years <- 
@@ -260,10 +260,7 @@ for (i in 1:nrow(goes_year_buckets)) {
   
   dir.create(glue::glue("{here::here()}/data/out/california_goes/{target_goes}_{year}/"), recursive = TRUE, showWarnings = FALSE)
   
-  (start <- Sys.time())
   sync_goes(target_goes, year)
-  (difftime(time1 = Sys.time(), time2 = start, units = "mins"))
-  
   goes_meta <- ls_goes(target_goes, year, upload = FALSE)
   no_fire_flags <- create_mask_lookup_table(target_goes, year, upload = TRUE)
   
@@ -274,40 +271,21 @@ for (i in 1:nrow(goes_year_buckets)) {
     dplyr::group_by(group) %>% 
     dplyr::group_split()
   
-  goes_meta_batches = goes_meta_batches[1:6]
-  
-  # set up parallelization
-  # (start <- Sys.time())
-  # future::plan(strategy = "multiprocess", workers = n_workers)
-  # 
-  # # parallelize over batches (parallelize to put each batch on a separate core)
-  # # iterate over rows in the batch (this gets done sequentially on each core)
-  # 
-  # goes_with_crs <-
-  #   furrr::future_map(goes_meta_batches, .f = subset_goes_to_california,
-  #                     target_goes = target_goes, 
-  #                     year = year, 
-  #                     california_geom = california_geom, 
-  #                     expected_cols = expected_cols, 
-  #                     no_fire_flags = no_fire_flags)
-  # future::plan(strategy = "sequential")
-  # (difftime(time1 = Sys.time(), time2 = start, units = "mins"))
-  
   goes_with_crs <-
-    pbapply::pblapply(goes_meta_batches, cl = 6, FUN = subset_goes_to_california,
+    pbapply::pblapply(goes_meta_batches, cl = n_workers, FUN = subset_goes_to_california,
                       target_goes = target_goes,
                       year = year,
                       california_geom = california_geom,
                       expected_cols = expected_cols,
                       no_fire_flags = no_fire_flags)
   
-  # future::plan(strategy = "sequential")
+  this_target_goes_year_crs <- data.table::rbindlist(goes_with_crs)
   
   (difftime(time1 = Sys.time(), time2 = start, units = "mins"))
   
-  readr::write_csv(x = goes_with_crs, file = glue::glue("{here::here()}/data/out/{target_goes}_{year}_conus-crs.csv"))
+  data.table::fwrite(x = this_target_goes_year_crs, file = glue::glue("{here::here()}/data/out/{target_goes}_{year}_crs.csv"))
   
-  system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/{target_goes}_{year}_conus-crs.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/{target_goes}_{year}_conus-crs.csv --acl public-read"))
+  system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/{target_goes}_{year}_crs.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/{target_goes}_{year}_crs.csv --acl public-read"))
   
   system2(command = "aws", args = glue::glue("s3 sync {here::here()}/data/out/california_goes/{target_goes}_{year}/ s3://earthlab-mkoontz/megafire-fine-scale-drivers/california_goes/{target_goes}_{year}/ --acl public-read"))
   
