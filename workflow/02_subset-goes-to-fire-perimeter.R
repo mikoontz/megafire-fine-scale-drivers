@@ -31,8 +31,6 @@ require(USAboundariesData)
 #### end dependencies ####
 
 #### Create directories
-dir.create(here::here("data/out/"), recursive = TRUE, showWarnings = FALSE)
-dir.create(here::here("data/raw/"), recursive = TRUE, showWarnings = FALSE)
 dir.create(here::here("data/out/california_goes"), recursive = TRUE, showWarnings = FALSE)
 
 #### Global variables ####
@@ -48,17 +46,6 @@ pbo <- pbapply::pboptions() # original pbapply options (to easily reset)
 pb_precision <- 100
 
 #### Functions ####
-
-#### Sync goes detections from AWS
-
-sync_goes <- function(target_goes, year) {
-  (start <- Sys.time())
-  system2(command = "aws", args = glue::glue("s3 sync s3://noaa-{target_goes}/ABI-L2-FDCC/{year} data/raw/{target_goes}/ABI-L2-FDCC/{year} --no-sign-request"), stdout = FALSE)
-  
-  return(NULL)
-}
-
-#### End sync function
 
 #### Get metadata from filenames of downloaded GOES images
 ls_goes <- function(target_goes, year, upload = TRUE) {
@@ -175,118 +162,132 @@ create_mask_lookup_table <- function(target_goes, year, upload = TRUE) {
     }
   }
   
-  # fire_flags <- 
-  #   readr::read_csv(file = here::here("data/out/goes-mask-meanings.csv")) %>% 
-  #   dplyr::filter(stringr::str_detect(flag_meanings, pattern = "_fire_pixel")) %>% 
-  #   dplyr::filter(stringr::str_detect(flag_meanings, pattern = "no_fire_pixel", negate = TRUE)) %>% 
-  #   dplyr::pull(flag_vals)
+  fire_flags <-
+    readr::read_csv(file = here::here("data/out/goes-mask-meanings.csv")) %>%
+    dplyr::filter(stringr::str_detect(flag_meanings, pattern = "_fire_pixel")) %>%
+    dplyr::filter(stringr::str_detect(flag_meanings, pattern = "no_fire_pixel", negate = TRUE)) %>%
+    dplyr::pull(flag_vals)
   
   no_fire_flags <-
     readr::read_csv(file = here::here("data/out/goes-mask-meanings.csv")) %>% 
     dplyr::filter(stringr::str_detect(flag_meanings, pattern = "no_fire_pixel")) %>% 
     dplyr::pull(flag_vals)
   
-  return(no_fire_flags)
+  return(list(no_fire_flags = no_fire_flags, fire_flags = fire_flags))
 }
 #### subset GOES images to fire detections in California
 
-subset_goes_to_california <- function(this_batch, target_goes, year, california_geom, expected_cols, no_fire_flags) {
+subset_goes_to_target_geom <- function(local_path_full, target_geom, target_crs, ...) {
   
-  out <- vector(mode = "list", length = nrow(this_batch))
+  # out <- vector(mode = "list", length = nrow(this_batch))
   
-  for (k in 1:nrow(this_batch)) {
-    local_path_full <- this_batch$local_path_full[k]
-    processed_filename <- this_batch$processed_filename[k]
-    
+  # for (k in 1:nrow(this_batch)) {
     this <- stars::read_stars(here::here(local_path_full), quiet = TRUE)
     
     this_crs <- sf::st_crs(this)$wkt
     
-    ca_goes_geom <- 
-      sf::st_transform(california_geom, crs = sf::st_crs(this))
+    target_geom_goes_transform <- 
+      sf::st_transform(target_geom, crs = sf::st_crs(this))
     
-    this_ca <-
+    this_within_target_geom <-
       this %>% 
-      sf::st_crop(ca_goes_geom) %>% # crop to just California
-      dplyr::mutate(cell = 1:prod(dim(.))) %>% # explicitly add the 'cell number' by multiplying nrow by ncol
-      as_tibble()
-    
-    missing_cols <- expected_cols[!(expected_cols %in% names(this_ca))]
-    
-    for (j in seq_along(missing_cols)) {
-      print(local_path_full)
-      this_ca[, missing_cols[j]] <- NA_real_
-    }
-    
-    this_ca <-
-      this_ca %>% 
-      dplyr::select(dplyr::all_of(expected_cols)) %>%  # convert to data frame
-      dplyr::filter(!is.na(Mask)) %>%  # filter out all of the masked cells
-      dplyr::filter(!(Mask %in% no_fire_flags)) %>% # filter out all pixels that are correcly processed but reported as "not fire" 
-      # dplyr::filter(Mask %in% fire_flags) %>% # filter to just fire pixels
-      sf::st_as_sf(coords = c("x", "y"), crs = sf::st_crs(this), remove = FALSE) %>% 
-      sf::st_transform(crs = sf::st_crs(3310)) %>% 
-      dplyr::mutate(x_3310 = sf::st_coordinates(.)[, 1],
-                    y_3310 = sf::st_coordinates(.)[, 2]) %>%
-      sf::st_drop_geometry()
-    
-    readr::write_csv(x = this_ca, file = glue::glue("{here::here()}/data/out/california_goes/{target_goes}_{year}/{processed_filename}"))
-    
-    out[[k]] <- dplyr::tibble(local_path_full, processed_filename, crs = this_crs)
-  }
+      sf::st_crop(target_geom_goes_transform) %>% # crop to just California
+      dplyr::mutate(cell = 1:prod(dim(.))) %>%  # explicitly add the 'cell number' by multiplying nrow by ncol
+      stars::st_transform_proj(crs = target_crs)
+  #   missing_cols <- expected_cols[!(expected_cols %in% names(this_ca))]
+  #   
+  #   for (j in seq_along(missing_cols)) {
+  #     print(local_path_full)
+  #     this_ca[, missing_cols[j]] <- NA_real_
+  #   }
+  #   
+  #   this_within_target_geom <-
+  #     this_within_target_geom %>% 
+  #     dplyr::select(dplyr::all_of(expected_cols)) %>%  # convert to data frame
+  #     dplyr::filter(!is.na(Mask)) %>%  # filter out all of the masked cells
+  #     dplyr::filter(!(Mask %in% no_fire_flags)) %>% # filter out all pixels that are correcly processed but reported as "not fire" 
+  #     # dplyr::filter(Mask %in% fire_flags) %>% # filter to just fire pixels
+  #     sf::st_as_sf(coords = c("x", "y"), crs = sf::st_crs(this), remove = FALSE) %>% 
+  #     sf::st_transform(crs = sf::st_crs(target_crs)) %>% 
+  #     dplyr::mutate(x_local = sf::st_coordinates(.)[, 1],
+  #                   y_local = sf::st_coordinates(.)[, 2]) %>%
+  #     sf::st_drop_geometry()
+  #   
+  #   readr::write_csv(x = this_ca, file = glue::glue("{here::here()}/data/out/california_goes/{target_goes}_{year}/{processed_filename}"))
+  #   
+  #   out[[k]] <- dplyr::tibble(local_path_full, processed_filename, crs = this_crs)
+  # }
+  # 
+  # crs_df <- data.table::rbindlist(out)
   
-  crs_df <- data.table::rbindlist(out)
-  
-  return(crs_df)
+  return(this_within_target_geom)
 }
 
 #### End function to subset goes images to just fire detections in california
 
+goes16_2020_meta <- readr::read_csv(file = "data/out/goes16_2020_conus-filenames.csv")
+goes17_2020_meta <- readr::read_csv(file = "data/out/goes17_2020_conus-filenames.csv")
+goes_meta <- dplyr::bind_rows(goes16_2020_meta, goes17_2020_meta)
 
-goes_year_buckets <-
-  lapply(c("goes16", "goes17"), FUN = function(target_goes) {
-    years <- 
-      system2(command = "aws", args = glue::glue("s3 ls s3://noaa-{target_goes}/ABI-L2-FDCC/  --no-sign-request"), stdout = TRUE) %>% 
-      stringr::str_extract_all(pattern = "[0-9]+") %>% 
-      unlist()
-    
-    return(dplyr::tibble(target_goes = target_goes, year = years))
-  }) %>% 
-  dplyr::bind_rows()
+fire_flag_meanings <- create_mask_lookup_table("goes16", "2020", upload = TRUE)
+no_fire_flags <- fire_flag_meanings$no_fire_flags
+fire_flags <- fire_flag_meanings$fire_flags
 
-for (i in 1:nrow(goes_year_buckets)) {
-  target_goes <- goes_year_buckets$target_goes[i]
-  year <- goes_year_buckets$year[i]
+# Get the fire perimeters that we'll be using!
+
+fires <- sf::st_read("data/out/megafire-events.gpkg")
+
+i = 1
+this_fire <- fires[i, ]
+# set up batches of goes metadata to iterate over for processing
+
+goes_meta_batches <-
+  goes_meta %>%
+  # dplyr::filter(scan_center_full >= this_fire$alarm_date & scan_center_full <= this_fire$cont_date)
+  dplyr::filter(scan_center_full >= this_fire$alarm_date & scan_center_full <= lubridate::ymd("2020-10-05")) %>% 
+  dplyr::mutate(n_fire_pixels = ncdf4::ncvar_get(ncdf4::nc_open(nc_path), varid = "total_number_of_pixels_with_fires_detected")) %>% 
+  dplyr::filter(n_fire_pixels > 0)
+
+target_geom <- sf::st_geometry(this_fire)
+
+test <- 
+  goes_meta_batches %>% 
+  dplyr::slice(1:5) %>% 
+  dplyr::mutate(star = purrr::pmap(.l = ., .f = subset_goes_to_target_geom, target_geom = target_geom, target_crs = 3310))
+
+nc_path <- goes_meta_batches$local_path_full[1]
+nc <- ncdf4::nc_open(nc_path)
+test <- 
+  goes_meta_batches %>% 
+  dplyr::slice(1:100) %>% 
   
-  dir.create(glue::glue("{here::here()}/data/out/california_goes/{target_goes}_{year}/"), recursive = TRUE, showWarnings = FALSE)
-  
-  sync_goes(target_goes, year)
-  goes_meta <- ls_goes(target_goes, year, upload = FALSE)
-  no_fire_flags <- create_mask_lookup_table(target_goes, year, upload = TRUE)
-  
-  # set up batches of goes metadata to iterate over for processing
-  goes_meta_batches <-
-    goes_meta %>% 
-    dplyr::mutate(group = sample(x = 1:(n_workers * pb_precision), size = nrow(.), replace = TRUE)) %>% 
-    dplyr::group_by(group) %>% 
-    dplyr::group_split()
-  
-  goes_with_crs <-
-    pbapply::pblapply(goes_meta_batches, cl = n_workers, FUN = subset_goes_to_california,
-                      target_goes = target_goes,
-                      year = year,
-                      california_geom = california_geom,
-                      expected_cols = expected_cols,
-                      no_fire_flags = no_fire_flags)
-  
-  this_target_goes_year_crs <- data.table::rbindlist(goes_with_crs)
-  
-  (difftime(time1 = Sys.time(), time2 = start, units = "mins"))
-  
-  data.table::fwrite(x = this_target_goes_year_crs, file = glue::glue("{here::here()}/data/out/{target_goes}_{year}_crs.csv"))
-  
-  system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/{target_goes}_{year}_crs.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/{target_goes}_{year}_crs.csv --acl public-read"))
-  
-  system2(command = "aws", args = glue::glue("s3 sync {here::here()}/data/out/california_goes/{target_goes}_{year}/ s3://earthlab-mkoontz/megafire-fine-scale-drivers/california_goes/{target_goes}_{year}/ --acl public-read"))
-  
+
+
+
+goes_meta_batches %>% 
+  dplyr::group_by(year, month, day, hour, min) %>% 
+  tally()
+
+  dplyr::mutate(group = sample(x = 1:(n_workers * pb_precision), size = nrow(.), replace = TRUE)) %>% 
+  dplyr::group_by(group) %>% 
+  dplyr::group_split()
+
+goes_with_crs <-
+  pbapply::pblapply(goes_meta_batches, cl = n_workers, FUN = subset_goes_to_california,
+                    target_goes = target_goes,
+                    year = year,
+                    california_geom = california_geom,
+                    expected_cols = expected_cols,
+                    no_fire_flags = no_fire_flags)
+
+this_target_goes_year_crs <- data.table::rbindlist(goes_with_crs)
+
+(difftime(time1 = Sys.time(), time2 = start, units = "mins"))
+
+data.table::fwrite(x = this_target_goes_year_crs, file = glue::glue("{here::here()}/data/out/{target_goes}_{year}_crs.csv"))
+
+system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/{target_goes}_{year}_crs.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/{target_goes}_{year}_crs.csv --acl public-read"))
+
+system2(command = "aws", args = glue::glue("s3 sync {here::here()}/data/out/california_goes/{target_goes}_{year}/ s3://earthlab-mkoontz/megafire-fine-scale-drivers/california_goes/{target_goes}_{year}/ --acl public-read"))
+
 } # end for loop; move on to the next combination of target_goes/year
