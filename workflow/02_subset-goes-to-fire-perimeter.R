@@ -30,14 +30,11 @@ if(!require(USAboundariesData)) {
 require(USAboundariesData)
 #### end dependencies ####
 
-#### Create directories
-dir.create(here::here("data/out/california_goes"), recursive = TRUE, showWarnings = FALSE)
-
 #### Global variables ####
 
 california_geom <- USAboundaries::us_states(resolution = "high", states = "California")
 expected_cols <- c("x", "y", "Area", "Temp", "Mask", "Power", "DQF", "cell")
-n_workers <- 16 # number of cores to split the GOES subsetting process up into
+n_workers <- 10 # number of cores to split the GOES subsetting process up into
 pbo <- pbapply::pboptions() # original pbapply options (to easily reset)
 
 # pb_precision becomes the multiplier for how many list items the goes
@@ -94,7 +91,7 @@ ls_goes <- function(target_goes, year, upload = TRUE) {
                                        stringr::str_pad(string = hour, width = 2, side = 'left', pad = '0'),
                                        stringr::str_pad(string = min, width = 2, side = 'left', pad = '0'),
                                        stringr::str_pad(string = sec, width = 2, side = 'left', pad = '0')),
-                  processed_filename = glue::glue("{scan_center}_{filebasename}.csv")) %>% 
+                  processed_filename = glue::glue("{scan_center}_{filebasename}.gpkg")) %>% 
     dplyr::select(target_goes, data_product, year, month, day, hour, min, sec, doy, filename, scan_start_full, scan_end_full, scan_center_full, scan_start, scan_end, scan_center, local_path_full, processed_filename, filebasename, aws_file)
   
   # Write the filenames for the target_goes/year combination to disk
@@ -175,58 +172,62 @@ create_mask_lookup_table <- function(target_goes, year, upload = TRUE) {
   
   return(list(no_fire_flags = no_fire_flags, fire_flags = fire_flags))
 }
-#### subset GOES images to fire detections in California
 
-subset_goes_to_target_geom <- function(local_path_full, target_geom, target_crs, ...) {
+
+#### subset GOES images to fire detections in specific fire perimeter, write to disk as .gpkg
+subset_goes_to_target_geom <- function(this_batch, target_geom, target_crs, target_dir, larger_geom, ...) {
   
-  # out <- vector(mode = "list", length = nrow(this_batch))
+  out <- vector(mode = "list", length = nrow(this_batch))
   
-  # for (k in 1:nrow(this_batch)) {
-    this <- stars::read_stars(here::here(local_path_full), quiet = TRUE)
+  for (k in 1:nrow(this_batch)) {
+    this <- stars::read_stars(here::here(this_batch$local_path_full[k]), quiet = TRUE)
     
     this_crs <- sf::st_crs(this)$wkt
     
     target_geom_goes_transform <- 
+      sf::st_transform(target_geom, crs = target_crs)
+    
+    larger_geom_target_transform <- 
       sf::st_transform(target_geom, crs = sf::st_crs(this))
     
     this_within_target_geom <-
       this %>% 
-      sf::st_crop(target_geom_goes_transform) %>% # crop to just California
-      dplyr::mutate(cell = 1:prod(dim(.))) %>%  # explicitly add the 'cell number' by multiplying nrow by ncol
-      stars::st_transform_proj(crs = target_crs)
-  #   missing_cols <- expected_cols[!(expected_cols %in% names(this_ca))]
-  #   
-  #   for (j in seq_along(missing_cols)) {
-  #     print(local_path_full)
-  #     this_ca[, missing_cols[j]] <- NA_real_
-  #   }
-  #   
-  #   this_within_target_geom <-
-  #     this_within_target_geom %>% 
-  #     dplyr::select(dplyr::all_of(expected_cols)) %>%  # convert to data frame
-  #     dplyr::filter(!is.na(Mask)) %>%  # filter out all of the masked cells
-  #     dplyr::filter(!(Mask %in% no_fire_flags)) %>% # filter out all pixels that are correcly processed but reported as "not fire" 
-  #     # dplyr::filter(Mask %in% fire_flags) %>% # filter to just fire pixels
-  #     sf::st_as_sf(coords = c("x", "y"), crs = sf::st_crs(this), remove = FALSE) %>% 
-  #     sf::st_transform(crs = sf::st_crs(target_crs)) %>% 
-  #     dplyr::mutate(x_local = sf::st_coordinates(.)[, 1],
-  #                   y_local = sf::st_coordinates(.)[, 2]) %>%
-  #     sf::st_drop_geometry()
-  #   
-  #   readr::write_csv(x = this_ca, file = glue::glue("{here::here()}/data/out/california_goes/{target_goes}_{year}/{processed_filename}"))
-  #   
-  #   out[[k]] <- dplyr::tibble(local_path_full, processed_filename, crs = this_crs)
-  # }
-  # 
-  # crs_df <- data.table::rbindlist(out)
+      dplyr::mutate(cell = as.integer(1:prod(dim(.)))) %>%  # explicitly add the 'cell number' by multiplying nrow by ncol
+      sf::st_crop(larger_geom_target_transform) %>% # crop to less than CONUS, but larger than fire
+      stars::st_transform_proj(crs = target_crs) %>% 
+      sf::st_as_sf() %>% 
+      sf::st_intersection(target_geom_goes_transform) %>% # Crop to specific fire outline
+      dplyr::mutate(scan_center = this_batch$scan_center[k],
+                    satellite = this_batch$target_goes[k]) %>% 
+      dplyr::select(scan_center, satellite, everything())
+    
+    sf::st_write(obj = this_within_target_geom, dsn = glue::glue("{target_dir}/{this_batch$processed_filename[k]}"), 
+                 delete_dsn = TRUE,
+                 quiet = TRUE)
+    
+    out[[k]] <- dplyr::tibble(this_batch$local_path_full[k], this_batch$processed_filename[k], crs = this_crs)
+  }
   
-  return(this_within_target_geom)
+  crs_df <- data.table::rbindlist(out)
+  
+  return(crs_df)
 }
 
 #### End function to subset goes images to just fire detections in california
+overwrite <- FALSE
 
-goes16_2020_meta <- readr::read_csv(file = "data/out/goes16_2020_conus-filenames.csv")
-goes17_2020_meta <- readr::read_csv(file = "data/out/goes17_2020_conus-filenames.csv")
+if(overwrite | !file.exists(here::here("data/out/goes16_2020_conus-filenames.csv"))) {
+  goes16_2020_meta <- ls_goes(target_goes = "goes16", year = "2020")
+} else {
+  goes16_2020_meta <- readr::read_csv(file = "data/out/goes16_2020_conus-filenames.csv")
+}
+
+if(overwrite | !file.exists(here::here("data/out/goes17_2020_conus-filenames.csv"))) {
+  goes17_2020_meta <- ls_goes(target_goes = "goes17", year = "2020")
+} else {
+  goes17_2020_meta <- readr::read_csv(file = "data/out/goes17_2020_conus-filenames.csv")
+}
+
 goes_meta <- dplyr::bind_rows(goes16_2020_meta, goes17_2020_meta)
 
 fire_flag_meanings <- create_mask_lookup_table("goes16", "2020", upload = TRUE)
@@ -239,55 +240,52 @@ fires <- sf::st_read("data/out/megafire-events.gpkg")
 
 i = 1
 this_fire <- fires[i, ]
+
+#### Create directories
+this_fire_dir <- glue::glue("{here::here()}/data/out/fires/{this_fire$IncidentName}")
+
+dir.create(glue::glue("{this_fire_dir}/goes"), recursive = TRUE, showWarnings = FALSE)
+
 # set up batches of goes metadata to iterate over for processing
 
-goes_meta_batches <-
+this_fire_goes_meta_batches <-
   goes_meta %>%
   # dplyr::filter(scan_center_full >= this_fire$alarm_date & scan_center_full <= this_fire$cont_date)
   dplyr::filter(scan_center_full >= this_fire$alarm_date & scan_center_full <= lubridate::ymd("2020-10-05")) %>% 
-  dplyr::mutate(n_fire_pixels = ncdf4::ncvar_get(ncdf4::nc_open(nc_path), varid = "total_number_of_pixels_with_fires_detected")) %>% 
-  dplyr::filter(n_fire_pixels > 0)
-
-target_geom <- sf::st_geometry(this_fire)
-
-test <- 
-  goes_meta_batches %>% 
-  dplyr::slice(1:5) %>% 
-  dplyr::mutate(star = purrr::pmap(.l = ., .f = subset_goes_to_target_geom, target_geom = target_geom, target_crs = 3310))
-
-nc_path <- goes_meta_batches$local_path_full[1]
-nc <- ncdf4::nc_open(nc_path)
-test <- 
-  goes_meta_batches %>% 
-  dplyr::slice(1:100) %>% 
-  
-
-
-
-goes_meta_batches %>% 
-  dplyr::group_by(year, month, day, hour, min) %>% 
-  tally()
-
-  dplyr::mutate(group = sample(x = 1:(n_workers * pb_precision), size = nrow(.), replace = TRUE)) %>% 
+  dplyr::mutate(group = sample(x = 1:(pb_precision * n_workers), size = nrow(.), replace = TRUE)) %>% 
   dplyr::group_by(group) %>% 
   dplyr::group_split()
 
-goes_with_crs <-
-  pbapply::pblapply(goes_meta_batches, cl = n_workers, FUN = subset_goes_to_california,
-                    target_goes = target_goes,
-                    year = year,
-                    california_geom = california_geom,
-                    expected_cols = expected_cols,
-                    no_fire_flags = no_fire_flags)
+target_geom <- sf::st_geometry(this_fire)
 
-this_target_goes_year_crs <- data.table::rbindlist(goes_with_crs)
+this_batch <-   this_fire_goes_meta_batches %>%
+  magrittr::extract2(1)
+
+crs_table_per_batch <- 
+  this_fire_goes_meta_batches %>%
+  magrittr::extract(1) %>% 
+  pbapply::pblapply(X = ., FUN = subset_goes_to_target_geom, target_geom = target_geom, target_crs = 3310, target_dir = glue::glue("{this_fire_dir}/goes"), larger_geom = california_geom)
+
+crs_table <- data.table::rbindlist(crs_table_per_batch)
+
+goes_test <- stars::read_stars("data/raw/goes16/ABI-L2-FDCC/2020/023/05/OR_ABI-L2-FDCC-M6_G16_s20200230501132_e20200230503505_c20200230504185.nc")
+sf::st_buffer(target_geom)
+
+larger_geom_target_transform <- 
+  sf::st_transform(target_geom, crs = sf::st_crs(goes_test))
+
+sf::st_buffer(larger_geom_target_transform, 1)
+
+test <- 
+  glue::glue("{this_fire_dir}/goes/{this_fire_goes_meta_batches[[1]]$processed_filename[10]}") %>% 
+  sf::st_read()
+
+plot(test$geom)
 
 (difftime(time1 = Sys.time(), time2 = start, units = "mins"))
 
-data.table::fwrite(x = this_target_goes_year_crs, file = glue::glue("{here::here()}/data/out/{target_goes}_{year}_crs.csv"))
+data.table::fwrite(x = crs_table, file = glue::glue("{this_fire_dir}/goes-crs-table.csv"))
 
-system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/{target_goes}_{year}_crs.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/{target_goes}_{year}_crs.csv --acl public-read"))
-
-system2(command = "aws", args = glue::glue("s3 sync {here::here()}/data/out/california_goes/{target_goes}_{year}/ s3://earthlab-mkoontz/megafire-fine-scale-drivers/california_goes/{target_goes}_{year}/ --acl public-read"))
-
-} # end for loop; move on to the next combination of target_goes/year
+# system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/{target_goes}_{year}_crs.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/{target_goes}_{year}_crs.csv --acl public-read"))
+# 
+# system2(command = "aws", args = glue::glue("s3 sync {here::here()}/data/out/california_goes/{target_goes}_{year}/ s3://earthlab-mkoontz/megafire-fine-scale-drivers/california_goes/{target_goes}_{year}/ --acl public-read"))
