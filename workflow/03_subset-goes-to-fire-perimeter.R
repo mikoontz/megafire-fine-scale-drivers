@@ -10,6 +10,7 @@ dependencies <- c("data.table",
                   "lubridate",
                   "ncdf4",
                   "pbapply",
+                  "parallel",
                   "purrr",
                   "readr", 
                   "sf", 
@@ -175,7 +176,7 @@ create_mask_lookup_table <- function(target_goes, year, upload = TRUE) {
 
 
 #### subset GOES images to fire detections in specific fire perimeter, write to disk as .gpkg
-subset_goes_to_target_geom <- function(this_batch, target_geom, target_crs, target_dir, larger_geom, ...) {
+subset_goes_to_target_geom <- function(this_batch, target_geom, target_crs, target_dir, ...) {
   
   out <- vector(mode = "list", length = nrow(this_batch))
   
@@ -184,19 +185,19 @@ subset_goes_to_target_geom <- function(this_batch, target_geom, target_crs, targ
     
     this_crs <- sf::st_crs(this)$wkt
     
-    target_geom_goes_transform <- 
-      sf::st_transform(target_geom, crs = target_crs)
-    
-    larger_geom_target_transform <- 
-      sf::st_transform(target_geom, crs = sf::st_crs(this))
-    
+    buffered_geom_goes_transform <- 
+      target_geom %>% 
+      sf::st_transform(crs = sf::st_crs(this)) %>% 
+      sf::st_bbox() %>% # bbox will be a much simpler geometry to buffer, since we're just using this as a first pass
+      sf::st_as_sfc() %>% 
+      sf::st_buffer(dist = 5000) # add an extra 3000 meters to the bounding box of the fire perimeter to capture neighboring GOES pixels 
+
     this_within_target_geom <-
       this %>% 
       dplyr::mutate(cell = as.integer(1:prod(dim(.)))) %>%  # explicitly add the 'cell number' by multiplying nrow by ncol
-      sf::st_crop(larger_geom_target_transform) %>% # crop to less than CONUS, but larger than fire
+      sf::st_crop(buffered_geom_goes_transform) %>% # crop to less than CONUS, but larger than fire
       stars::st_transform_proj(crs = target_crs) %>% 
       sf::st_as_sf() %>% 
-      sf::st_intersection(target_geom_goes_transform) %>% # Crop to specific fire outline
       dplyr::mutate(scan_center = this_batch$scan_center[k],
                     satellite = this_batch$target_goes[k]) %>% 
       dplyr::select(scan_center, satellite, everything())
@@ -238,54 +239,60 @@ fire_flags <- fire_flag_meanings$fire_flags
 
 fires <- sf::st_read("data/out/megafire-events.gpkg")
 
+# We're building a prototype using the Creek Fire
 i = 1
 this_fire <- fires[i, ]
+target_geom <- sf::st_geometry(this_fire)
 
 #### Create directories
 this_fire_dir <- glue::glue("{here::here()}/data/out/fires/{this_fire$IncidentName}")
-
 dir.create(glue::glue("{this_fire_dir}/goes"), recursive = TRUE, showWarnings = FALSE)
 
 # set up batches of goes metadata to iterate over for processing
+already_processed_goes <-
+  list.files(glue::glue("{this_fire_dir}/goes"))
 
 this_fire_goes_meta_batches <-
   goes_meta %>%
-  # dplyr::filter(scan_center_full >= this_fire$alarm_date & scan_center_full <= this_fire$cont_date)
-  dplyr::filter(scan_center_full >= this_fire$alarm_date & scan_center_full <= lubridate::ymd("2020-10-05")) %>% 
+  dplyr::filter(!(processed_filename %in% already_processed_goes)) %>% 
+  dplyr::filter(scan_center_full >= this_fire$alarm_date & scan_center_full <= this_fire$cont_date) %>% 
   dplyr::mutate(group = sample(x = 1:(pb_precision * n_workers), size = nrow(.), replace = TRUE)) %>% 
   dplyr::group_by(group) %>% 
   dplyr::group_split()
 
-target_geom <- sf::st_geometry(this_fire)
+(start <- Sys.time())
+# setup parallelization
+if (.Platform$OS.type == "windows") {
+  cl <- parallel::makeCluster(n_workers)
+  parallel::clusterEvalQ(cl = cl, expr = {
+    library(dplyr)
+    library(sf)
+    library(data.table)
+    library(stars)
+  })
+} else {
+  cl <- n_workers
+}
 
-this_batch <-   this_fire_goes_meta_batches %>%
-  magrittr::extract2(1)
-
+# work all of the relevant GOES images for the Creek fire and write them to .gpkg files on disk
 crs_table_per_batch <- 
   this_fire_goes_meta_batches %>%
-  magrittr::extract(1) %>% 
-  pbapply::pblapply(X = ., FUN = subset_goes_to_target_geom, target_geom = target_geom, target_crs = 3310, target_dir = glue::glue("{this_fire_dir}/goes"), larger_geom = california_geom)
+  pbapply::pblapply(X = ., 
+                    cl = cl,
+                    FUN = subset_goes_to_target_geom, # function to be applied to each batch
+                    target_geom = target_geom, # extra arguments
+                    target_crs = 3310, # the crs to transform the GOES detections to
+                    target_dir = glue::glue("{this_fire_dir}/goes")) # directory to store the processed files
 
-crs_table <- data.table::rbindlist(crs_table_per_batch)
+crs_table <- data.table::rbindlist(crs_table_per_batch) # function returns the crs, so rbind them all together and write to disk
+data.table::fwrite(x = crs_table, file = glue::glue("{this_fire_dir}/goes-crs-table.csv"))
 
-goes_test <- stars::read_stars("data/raw/goes16/ABI-L2-FDCC/2020/023/05/OR_ABI-L2-FDCC-M6_G16_s20200230501132_e20200230503505_c20200230504185.nc")
-sf::st_buffer(target_geom)
-
-larger_geom_target_transform <- 
-  sf::st_transform(target_geom, crs = sf::st_crs(goes_test))
-
-sf::st_buffer(larger_geom_target_transform, 1)
-
-test <- 
-  glue::glue("{this_fire_dir}/goes/{this_fire_goes_meta_batches[[1]]$processed_filename[10]}") %>% 
-  sf::st_read()
-
-plot(test$geom)
+if (.Platform$OS.type == "windows") {
+  parallel::stopCluster(cl)
+}
 
 (difftime(time1 = Sys.time(), time2 = start, units = "mins"))
 
-data.table::fwrite(x = crs_table, file = glue::glue("{this_fire_dir}/goes-crs-table.csv"))
+system2(command = "aws", args = glue::glue("s3 cp {this_fire_dir}/goes-crs-table.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/{this_fire$IncidentName}/goes-crs-table.csv --acl public-read"))
 
-# system2(command = "aws", args = glue::glue("s3 cp {here::here()}/data/out/{target_goes}_{year}_crs.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/{target_goes}_{year}_crs.csv --acl public-read"))
-# 
-# system2(command = "aws", args = glue::glue("s3 sync {here::here()}/data/out/california_goes/{target_goes}_{year}/ s3://earthlab-mkoontz/megafire-fine-scale-drivers/california_goes/{target_goes}_{year}/ --acl public-read"))
+system2(command = "aws", args = glue::glue("s3 sync {this_fire_dir}/goes s3://earthlab-mkoontz/megafire-fine-scale-drivers/{this_fire_dir}/goes --acl public-read"))
