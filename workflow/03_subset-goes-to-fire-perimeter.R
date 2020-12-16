@@ -206,7 +206,7 @@ subset_goes_to_target_geom <- function(this_batch, target_geom, target_crs, targ
                  delete_dsn = TRUE,
                  quiet = TRUE)
     
-    out[[k]] <- dplyr::tibble(this_batch$local_path_full[k], this_batch$processed_filename[k], crs = this_crs)
+    out[[k]] <- dplyr::tibble(local_path_full = this_batch$local_path_full[k], processed_filename = this_batch$processed_filename[k], crs = this_crs)
   }
   
   crs_df <- data.table::rbindlist(out)
