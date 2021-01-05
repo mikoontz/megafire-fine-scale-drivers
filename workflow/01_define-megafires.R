@@ -47,7 +47,7 @@ megafires_nifc <-
   dplyr::filter(IncidentName == "Creek") %>%
   dplyr::mutate(IncidentName = tolower(IncidentName),
                 alarm_date = lubridate::ymd("2020-09-04"),
-                cont_date = lubridate::today())
+                cont_date = lubridate::ymd("2020-12-24")) # https://www.fs.usda.gov/detail/sierra/news-events/?cid=FSEPRD869359
 
 sf::st_write(obj = megafires_nifc, dsn = "data/out/megafire-events.gpkg", delete_dsn = TRUE)
 
