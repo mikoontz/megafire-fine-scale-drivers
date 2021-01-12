@@ -83,7 +83,7 @@ if (.Platform$OS.type == "windows") {
   cl <- n_workers
 }
 
-afd <- 
+nonfire_filtered <- 
   goes_sf_batches %>%
   pbapply::pblapply(X = ., 
                     cl = cl,
@@ -91,29 +91,21 @@ afd <-
                     no_fire_flags = no_fire_flags,
                     this_fire_dir = this_fire_dir)
 
-afd <- 
-  data.table::rbindlist(afd) %>% 
+nonfire_filtered <- 
+  data.table::rbindlist(nonfire_filtered) %>% 
   sf::st_as_sf()
 
-sf::st_write(obj = afd, dsn = "data/out/fires/creek/goes-active-fire-detections.gpkg")
+sf::st_write(obj = nonfire_filtered, dsn = glue::glue("{this_fire_dir}/goes-nonfire-filtered.gpkg"), delete_dsn = TRUE)
 
 parallel::stopCluster(cl = cl)
 (difftime(time1 = Sys.time(), time2 = start, units = "mins"))
 
-fd <- 
-  afd %>% 
-  dplyr::filter(Mask %in% fire_flags) %>% 
-  dplyr::mutate(scan_center_full = lubridate::ymd_hms(scan_center)) %>% 
-  dplyr::mutate(rounded_datetime = round(scan_center_full, "hour"))
+system2(command = "aws", args = glue::glue("s3 cp {this_fire_dir}/goes-nonfire-filtered.gpkg s3://earthlab-mkoontz/megafire-fine-scale-drivers/{this_fire$IncidentName}/goes-nonfire-filtered.gpkg --acl public-read"))
 
-fd_by_hour <- 
-  fd %>% 
-  sf::st_drop_geometry() %>% 
-  dplyr::group_by(rounded_datetime, satellite) %>% 
-  dplyr::tally() %>% 
-  dplyr::mutate(rounded_datetime = as.POSIXct(rounded_datetime))
+just_fire <- 
+  nonfire_filtered %>% 
+  dplyr::filter(Mask %in% fire_flags)
 
-library(ggplot2)
+sf::st_write(obj = just_fire, dsn = glue::glue("{this_fire_dir}/goes-active-fire-detections.gpkg"), delete_dsn = TRUE)
 
-ggplot(fd_by_hour, aes(x = rounded_datetime, y = n, color = satellite)) +
-  geom_line()
+system2(command = "aws", args = glue::glue("s3 cp {this_fire_dir}/goes-active-fire-detections.gpkg s3://earthlab-mkoontz/megafire-fine-scale-drivers/{this_fire$IncidentName}/goes-active-fire-detections.gpkg --acl public-read"))

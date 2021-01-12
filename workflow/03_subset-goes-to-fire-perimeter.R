@@ -144,4 +144,4 @@ if (.Platform$OS.type == "windows") {
 
 system2(command = "aws", args = glue::glue("s3 cp {this_fire_dir}/goes-crs-table.csv s3://earthlab-mkoontz/megafire-fine-scale-drivers/{this_fire$IncidentName}/goes-crs-table.csv --acl public-read"))
 
-system2(command = "aws", args = glue::glue("s3 sync {this_fire_dir}/goes s3://earthlab-mkoontz/megafire-fine-scale-drivers/{this_fire_dir}/goes --acl public-read"))
+system2(command = "aws", args = glue::glue("s3 sync {this_fire_dir}/goes s3://earthlab-mkoontz/megafire-fine-scale-drivers/{this_fire$IncidentName}/goes --acl public-read"))
