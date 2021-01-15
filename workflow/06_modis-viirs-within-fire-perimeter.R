@@ -73,3 +73,7 @@ viirs_this_fire <-
 
 st_write(obj = modis_this_fire, dsn = glue::glue("{this_fire_dir}/modis-active-fire-detections.gpkg"))
 st_write(obj = viirs_this_fire, dsn = glue::glue("{this_fire_dir}/viirs-active-fire-detections.gpkg"))
+
+system2(command = "aws", args = glue::glue("s3 cp {this_fire_dir}/modis-active-fire-detections.gpkg s3://earthlab-mkoontz/megafire-fine-scale-drivers/{this_fire$IncidentName}/modis-active-fire-detections.gpkg --acl public-read"))
+
+system2(command = "aws", args = glue::glue("s3 cp {this_fire_dir}/viirs-active-fire-detections.gpkg s3://earthlab-mkoontz/megafire-fine-scale-drivers/{this_fire$IncidentName}/viirs-active-fire-detections.gpkg --acl public-read"))
