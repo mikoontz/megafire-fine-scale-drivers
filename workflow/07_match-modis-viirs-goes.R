@@ -2,6 +2,11 @@ library(sf)
 library(dplyr)
 library(lubridate)
 
+this_fire <- 
+  sf::st_read("data/out/megafire-events.gpkg") %>% 
+  slice(1) %>% 
+  sf::st_transform(3310)
+
 this_fire_dir <- glue::glue("{here::here()}/data/out/fires/{this_fire$IncidentName}")
 
 if(!file.exists(glue::glue("{this_fire_dir}/modis-active-fire-detections.gpkg"))) {

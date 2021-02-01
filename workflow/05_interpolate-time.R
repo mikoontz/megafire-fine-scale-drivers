@@ -60,10 +60,13 @@ earliest_afd <-
 ggplot(earliest_afd, aes(fill = scan_center_full)) +
   geom_sf() +
   facet_grid(cols = vars(satellite)) +
-  geom_sf(data = this_fire, inherit.aes = FALSE, alpha = 0.4, fill = "pink")
+  geom_sf(data = this_fire, inherit.aes = FALSE, alpha = 0.4, fill = "pink") +
+  labs(fill = "Earliest detection date")
+
+ggsave(filename = "figs/creek-fire_earliest-goes_parallax.png")
 
 
-
+sqrt(st_area(earliest_afd))
 
 
 
