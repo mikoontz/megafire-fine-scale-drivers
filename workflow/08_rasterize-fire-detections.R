@@ -3,6 +3,7 @@ library(dplyr)
 library(lubridate)
 library(fasterize)
 library(terra)
+library(glue)
 
 this_fire <- 
   sf::st_read("data/out/megafire-events.gpkg") %>% 
@@ -41,15 +42,13 @@ rafd <- fasterize::fasterize(sf = afd, raster = r, field = "hours_elapsed", fun 
 plot(rafd)
 plot(st_geometry(this_fire), add = TRUE)
 
-fw <- raster::focalWeight(x = rafd, d = 3, type = "Gauss")
-
-frafd <- raster::focal(x = rafd, w = fw)
-plot(frafd)
-
-fire_speed <- 1 / raster::terrain(x = frafd, opt = "slope", unit = "tangent")
-fire_direction <- cos(raster::terrain(x = frafd, opt = "aspect", unit = "radians") + pi / 2)
-
-plot(fire_speed)
-plot(fire_direction)
-raster::terrain
-?raster::terrain
+# fw <- raster::focalWeight(x = rafd, d = 3, type = "Gauss")
+# 
+# frafd <- raster::focal(x = rafd, w = fw)
+# plot(frafd)
+# 
+# fire_speed <- 1 / raster::terrain(x = rafd, opt = "slope", unit = "tangent")
+# fire_direction <- cos(raster::terrain(x = frafd, opt = "aspect", unit = "radians") + pi / 2)
+# 
+# plot(fire_speed)
+# plot(fire_direction)

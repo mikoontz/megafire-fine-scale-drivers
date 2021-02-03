@@ -44,3 +44,10 @@ vignettes/*.pdf
 data/*
 
 workflow/00_credentials.R
+
+*.pdf
+*.docx
+
+docs/rules-for-national-interagency-fire-enterprise-geospatial-portal.txt
+docs/docs_carpentry/*
+docs/reports/*
