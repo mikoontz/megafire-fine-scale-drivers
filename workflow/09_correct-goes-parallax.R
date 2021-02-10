@@ -5,6 +5,7 @@ library(dplyr)
 library(lubridate)
 library(ggplot2)
 library(magrittr)
+library(tidyr)
 
 this_fire <- 
   sf::st_read("data/out/megafire-events.gpkg") %>% 
@@ -27,23 +28,30 @@ goes_list <-
 
 afd <- goes_list[[3]]
 
-test <-
+offsets <-
   afd %>% 
-  group_by(satellite) %>% 
+  group_by(acq_datetime_hour, satellite) %>% 
   summarize() %>% 
   st_centroid() %>% 
   mutate(x = sapply(X = geom, FUN = `[`, 1),
-         y = sapply(X = geom, FUN = `[`, 2))
+         y = sapply(X = geom, FUN = `[`, 2)) %>% 
+  st_drop_geometry() %>% 
+  ungroup() %>% 
+  pivot_wider(id_cols = c(acq_datetime_hour), names_from = satellite, values_from = c(x, y)) %>% 
+  mutate(x_offset_goes16 = x_goes17 - x_goes16,
+         x_offset_goes17 = -x_offset_goes16,
+         y_offset_goes16 = y_goes17 - y_goes16,
+         y_offset_goes17 = -y_offset_goes16) %>% 
+  dplyr::select(acq_datetime_hour, contains("offset"))
 
-purrr::map_dbl(test$geom, .f = extract)
+offsets
 
-str(test$geom)
-(test$geom[[1]][1])
 ggplot() +
   geom_sf(data = st_geometry(this_fire)) +
   geom_sf(data = goes_list[[3]]) +
   facet_wrap(facets = "satellite")
 
-
+afd + c()
+?sf
 ggplot() +
   geom_sf(data = goes_list[[3]], mapping = aes(fill = satellite), alpha = 0.2)
