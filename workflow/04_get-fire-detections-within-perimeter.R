@@ -46,11 +46,19 @@ source("workflow/fxn_extract-active-fire-detections.R")
 
 
 ### Which Mask values are for fires?
-flag_lookup <- create_mask_lookup_table("goes16", "2020", upload = FALSE)
-no_fire_flags <- flag_lookup$no_fire_flags
-fire_flags <- flag_lookup$fire_flags
-fire_flag_meanings <- readr::read_csv("data/out/goes-mask-meanings.csv")
+### Get the fire flag and no fire flag values
+fire_flags <-
+  readr::read_csv(file = here::here("data/out/goes-mask-meanings.csv")) %>%
+  dplyr::filter(stringr::str_detect(flag_meanings, pattern = "_fire_pixel")) %>%
+  dplyr::filter(stringr::str_detect(flag_meanings, pattern = "no_fire_pixel", negate = TRUE)) %>%
+  dplyr::pull(flag_vals)
 
+no_fire_flags <-
+  readr::read_csv(file = here::here("data/out/goes-mask-meanings.csv")) %>% 
+  dplyr::filter(stringr::str_detect(flag_meanings, pattern = "no_fire_pixel")) %>% 
+  dplyr::pull(flag_vals)
+
+### Get the megafire events
 fires <- sf::st_read("data/out/megafire-events.gpkg")
 
 # We're building a prototype using the Creek Fire

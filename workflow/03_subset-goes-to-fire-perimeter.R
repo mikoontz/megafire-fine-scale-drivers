@@ -45,30 +45,85 @@ pb_precision <- 100
 
 #### Functions ####
 
-source("workflow/fxn_ls-goes.R")
 source("workflow/fxn_create-mask-lookup-table.R")
-source("workflow/fxn_subset-goes-to-target-geom.R")
 
-#### End function to subset goes images to just fire detections in california
-overwrite <- FALSE
+#### subset GOES images to fire detections in specific fire perimeter, write to disk as .gpkg
+subset_goes_to_target_geom <- function(this_batch, target_geom, target_crs, target_dir, ...) {
+  
+  out <- vector(mode = "list", length = nrow(this_batch))
+  
+  for (k in 1:nrow(this_batch)) {
+    this <- stars::read_stars(here::here(this_batch$local_path_full[k]), quiet = TRUE)
+    
+    this_crs <- sf::st_crs(this)$wkt
+    
+    buffered_geom_goes_transform <- 
+      target_geom %>% 
+      sf::st_transform(crs = sf::st_crs(this)) %>% 
+      sf::st_bbox() %>% # bbox will be a much simpler geometry to buffer, since we're just using this as a first pass
+      sf::st_as_sfc() %>% 
+      sf::st_buffer(dist = 5000) # add an extra 3000 meters to the bounding box of the fire perimeter to capture neighboring GOES pixels 
+    
+    this_within_target_geom <-
+      this %>% 
+      dplyr::mutate(cell = as.integer(1:prod(dim(.)))) %>%  # explicitly add the 'cell number' by multiplying nrow by ncol
+      sf::st_crop(buffered_geom_goes_transform) %>% # crop to less than CONUS, but larger than fire
+      stars::st_transform_proj(crs = target_crs) %>% 
+      sf::st_as_sf() %>% 
+      dplyr::mutate(scan_center = this_batch$scan_center[k],
+                    satellite = this_batch$target_goes[k]) %>% 
+      dplyr::select(scan_center, satellite, everything())
+    
+    sf::st_write(obj = this_within_target_geom, dsn = glue::glue("{target_dir}/{this_batch$processed_filename[k]}"), 
+                 delete_dsn = TRUE,
+                 quiet = TRUE)
+    
+    out[[k]] <- dplyr::tibble(local_path_full = this_batch$local_path_full[k], processed_filename = this_batch$processed_filename[k], crs = this_crs)
+  }
+  
+  crs_df <- data.table::rbindlist(out)
+  
+  return(crs_df)
+}
+#### End function to subset goes images to just fire detections in target geom
 
-if(overwrite | !file.exists(here::here("data/out/goes16_2020_conus-filenames.csv"))) {
-  goes16_2020_meta <- ls_goes(target_goes = "goes16", year = "2020")
-} else {
-  goes16_2020_meta <- readr::read_csv(file = "data/out/goes16_2020_conus-filenames.csv")
+####
+
+### Get the GOES metadata
+download <- TRUE
+
+if(!file.exists(here::here("data/out/goes16_2020_conus-filenames.csv"))) {
+  if(download) {
+    system2(command = "aws", args = glue::glue("s3 cp s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes16_2020_conus-filenames.csv {here::here()}/data/out/goes16_2020_conus-filenames.csv"))
+  } else {
+    source("workflow/02_get-goes-and-metadata.R")
+  }
 }
 
-if(overwrite | !file.exists(here::here("data/out/goes17_2020_conus-filenames.csv"))) {
-  goes17_2020_meta <- ls_goes(target_goes = "goes17", year = "2020")
-} else {
-  goes17_2020_meta <- readr::read_csv(file = "data/out/goes17_2020_conus-filenames.csv")
+if(!file.exists(here::here("data/out/goes17_2020_conus-filenames.csv"))) {
+  if(download) {
+    system2(command = "aws", args = glue::glue("s3 cp s3://earthlab-mkoontz/megafire-fine-scale-drivers/goes17_2020_conus-filenames.csv {here::here()}/data/out/goes17_2020_conus-filenames.csv"))
+  } else {
+    source("workflow/02_get-goes-and-metadata.R")
+  }
 }
+
+goes16_2020_meta <- readr::read_csv(file = "data/out/goes16_2020_conus-filenames.csv")
+goes17_2020_meta <- readr::read_csv(file = "data/out/goes17_2020_conus-filenames.csv")
 
 goes_meta <- dplyr::bind_rows(goes16_2020_meta, goes17_2020_meta)
 
-fire_flag_meanings <- create_mask_lookup_table("goes16", "2020", upload = TRUE)
-no_fire_flags <- fire_flag_meanings$no_fire_flags
-fire_flags <- fire_flag_meanings$fire_flags
+### Get the fire flag and no fire flag values
+fire_flags <-
+  readr::read_csv(file = here::here("data/out/goes-mask-meanings.csv")) %>%
+  dplyr::filter(stringr::str_detect(flag_meanings, pattern = "_fire_pixel")) %>%
+  dplyr::filter(stringr::str_detect(flag_meanings, pattern = "no_fire_pixel", negate = TRUE)) %>%
+  dplyr::pull(flag_vals)
+
+no_fire_flags <-
+  readr::read_csv(file = here::here("data/out/goes-mask-meanings.csv")) %>% 
+  dplyr::filter(stringr::str_detect(flag_meanings, pattern = "no_fire_pixel")) %>% 
+  dplyr::pull(flag_vals)
 
 # Get the fire perimeters that we'll be using!
 
@@ -82,6 +137,10 @@ target_geom <- sf::st_geometry(this_fire)
 #### Create directories
 this_fire_dir <- glue::glue("{here::here()}/data/out/fires/{this_fire$IncidentName}")
 dir.create(glue::glue("{this_fire_dir}/goes"), recursive = TRUE, showWarnings = FALSE)
+
+if(!file.exists(glue::glue("{this_fire_dir}/goes-crs-table.csv"))) {
+  system2(command = "aws", args = glue::glue("s3 cp s3://earthlab-mkoontz/megafire-fine-scale-drivers/{this_fire$IncidentName}/goes-crs-table.csv {this_fire_dir}/goes-crs-table.csv"))
+}
 
 # set up batches of goes metadata to iterate over for processing
 old_crs_table <- try(readr::read_csv(glue::glue("{this_fire_dir}/goes-crs-table.csv")))
