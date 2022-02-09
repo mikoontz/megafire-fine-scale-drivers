@@ -59,7 +59,7 @@ ls_goes <- function(target_goes, year, upload = TRUE) {
     tidyr::separate(col = aws_file, into = c("data_product", "year", "doy", "hour", "filename"), sep = "/", remove = FALSE) %>% 
     dplyr::mutate(filebasename = stringr::str_sub(string = filename, start = 1, end = -4)) %>% 
     dplyr::mutate(doy = as.numeric(doy), year = as.numeric(year)) %>% 
-    dplyr::mutate(tmp_date = as.Date(doy, origin = glue::glue("{year}-01-01")),
+    dplyr::mutate(tmp_date = as.Date(doy - 1, origin = glue::glue("{year}-01-01")), # Note that R uses 0-indexing for dates from an origin
                   month = lubridate::month(tmp_date),
                   day = lubridate::day(tmp_date)) %>% 
     dplyr::mutate(scan_start = stringr::str_sub(filename, start = 24, end = 37),
@@ -74,8 +74,8 @@ ls_goes <- function(target_goes, year, upload = TRUE) {
                   scan_end_min = as.numeric(stringr::str_sub(scan_end, start = 10, end = 11)),
                   scan_start_sec = as.numeric(stringr::str_sub(scan_start, start = 12, end = 14)) / 10,
                   scan_end_sec = as.numeric(stringr::str_sub(scan_end, start = 12, end = 14)) / 10,
-                  scan_start_date = as.character(as.Date(scan_start_doy, origin = glue::glue("{scan_start_year}-01-01"))),
-                  scan_end_date = as.character(as.Date(scan_end_doy, origin = glue::glue("{scan_end_year}-01-01"))),
+                  scan_start_date = as.character(as.Date(scan_start_doy - 1, origin = glue::glue("{scan_start_year}-01-01"))),
+                  scan_end_date = as.character(as.Date(scan_end_doy - 1, origin = glue::glue("{scan_end_year}-01-01"))),
                   scan_start_full = lubridate::ymd_hms(glue::glue("{scan_start_date} {scan_start_hour}:{scan_start_min}:{scan_start_sec}")),
                   scan_end_full = lubridate::ymd_hms(glue::glue("{scan_end_date} {scan_end_hour}:{scan_end_min}:{scan_end_sec}")),
                   scan_center_full = scan_start_full + difftime(scan_end_full, scan_start_full) / 2,
